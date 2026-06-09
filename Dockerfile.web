@@ -13,6 +13,9 @@ ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 COPY package.json ./
 COPY packages/web ./packages/web
 
+# public 目录可能为空，确保存在以免 runner 阶段 COPY 失败
+RUN mkdir -p packages/web/public
+
 RUN npm install
 RUN npm run build -w @loop/web
 

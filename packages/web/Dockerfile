@@ -23,6 +23,8 @@ RUN npm install
 
 COPY packages/web ./packages/web
 
+RUN mkdir -p packages/web/public
+
 RUN npm run build -w @loop/web
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
