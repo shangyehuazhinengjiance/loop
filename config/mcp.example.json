@@ -1,0 +1,14 @@
+{
+  "deploy": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-everything"],
+    "env": {}
+  },
+  "github": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": {
+      "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+    }
+  }
+}

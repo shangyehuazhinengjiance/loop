@@ -1,0 +1,28 @@
+# 系统默认 Agent / 模型配置
+# 项目级配置可覆盖；Loop 级 modelOverrides 可再覆盖
+
+agents:
+  pm:
+    provider: openai-compatible
+    base_url: ${PM_MODEL_BASE_URL}
+    model: ${PM_MODEL_NAME}
+    api_key_env: PM_MODEL_API_KEY
+    runtime: client-sdk
+    max_tokens: 8192
+
+  dev:
+    provider: anthropic-compatible
+    base_url: ${DEV_MODEL_BASE_URL}
+    model: ${DEV_MODEL_NAME}
+    fast_model: ${DEV_MODEL_FAST}
+    api_key_env: DEV_MODEL_API_KEY
+    runtime: agent-sdk
+    permission_mode: acceptEdits
+
+  ops:
+    provider: anthropic-compatible
+    base_url: ${OPS_MODEL_BASE_URL}
+    model: ${OPS_MODEL_NAME}
+    api_key_env: OPS_MODEL_API_KEY
+    runtime: agent-sdk
+    permission_mode: default

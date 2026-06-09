@@ -1,0 +1,20 @@
+{
+  "name": "ai-native-loop",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "packages/agents/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:orchestrator": "npm run dev -w @loop/orchestrator",
+    "dev:gateway": "npm run dev -w @loop/gateway",
+    "dev:web": "npm run dev -w @loop/web",
+    "db:migrate": "npm run migrate -w @loop/orchestrator",
+    "test": "npm run test --workspaces --if-present",
+    "e2e": "powershell -File scripts/e2e-smoke.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
