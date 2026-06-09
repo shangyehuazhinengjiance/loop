@@ -7,7 +7,6 @@ FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
 WORKDIR /app
 
 COPY package.json ./
-COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/orchestrator/package.json ./packages/orchestrator/
 COPY packages/agents/pm/package.json ./packages/agents/pm/
@@ -33,9 +32,7 @@ RUN npm run build -w @loop/shared \
 # ── 生产镜像 ─────────────────────────────────────────────
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache git openssh-client ca-certificates
 
 WORKDIR /app
 

@@ -7,7 +7,6 @@ FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
 WORKDIR /app
 
 COPY package.json ./
-COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/gateway/package.json ./packages/gateway/
 
@@ -19,7 +18,7 @@ COPY packages/gateway ./packages/gateway
 RUN npm run build -w @loop/shared \
  && npm run build -w @loop/gateway
 
-FROM node:20-alpine AS runner
+FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
 
 WORKDIR /app
 

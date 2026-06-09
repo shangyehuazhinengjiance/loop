@@ -11,6 +11,33 @@
 | `loop-gateway` | `packages/gateway/Dockerfile` | 3001 | WebSocket 群聊 |
 | `loop-web` | `packages/web/Dockerfile` | 3002 | Next.js 前端 |
 
+## 构建上下文（重要）
+
+**必须把仓库根目录 `.` 作为 build context**，不能只传 `packages/orchestrator`：
+
+```bash
+# 正确：最后一个参数是 .
+docker build -f packages/orchestrator/Dockerfile -t loop-orchestrator .
+
+# 错误：会找不到 package.json / packages/*
+docker build -t loop-orchestrator packages/orchestrator
+```
+
+Jenkins / GitLab CI 示例：
+
+```groovy
+// Jenkins
+dir('loop') {
+  sh 'docker build -f packages/orchestrator/Dockerfile -t $IMAGE .'
+}
+```
+
+```yaml
+# GitLab CI
+script:
+  - docker build -f packages/orchestrator/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+```
+
 ## 本地构建（在仓库根目录执行）
 
 ```bash
