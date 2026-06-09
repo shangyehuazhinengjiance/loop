@@ -2,6 +2,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { runOpsAgent } from './run.js';
+import type { LoopRecord } from './orchestrator-api.js';
+import type { Phase } from '@loop/shared';
 
 dotenv.config({
   path: join(dirname(fileURLToPath(import.meta.url)), '../../../../.env'),
@@ -18,7 +20,10 @@ const orchestratorUrl =
 
 async function main() {
   const res = await fetch(`${orchestratorUrl}/api/loops/${loopId}`);
-  const loop = await res.json();
+  const loop = (await res.json()) as LoopRecord & {
+    workspace_path?: string;
+    phase: Phase;
+  };
   const workspacePath =
     loop.workspace_path ??
     join(process.env.WORKSPACE_ROOT ?? './workspaces', `loop-${loopId}`);

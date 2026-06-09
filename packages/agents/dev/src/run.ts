@@ -101,7 +101,8 @@ export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
       permissionMode: 'acceptEdits',
       resume: sessionId,
       env,
-      hooks,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hooks: hooks as any,
       agents: DEV_SUBAGENTS,
     },
   })) {

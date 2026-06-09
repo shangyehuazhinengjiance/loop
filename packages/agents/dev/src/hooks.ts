@@ -3,6 +3,20 @@ import type { OrchestratorApi } from './orchestrator-api.js';
 const BLOCKED_BASH = [/rm\s+-rf\s+\//, /mkfs/, /curl\s+.*\|\s*sh/];
 const SENSITIVE_FILES = [/\.env$/, /id_rsa$/, /\.pem$/];
 
+function bashCommand(input: unknown): string {
+  const toolInput = (input as { tool_input?: { command?: string } }).tool_input;
+  return toolInput?.command ?? '';
+}
+
+function filePath(input: unknown): string {
+  const toolInput = (input as { tool_input?: { file_path?: string } }).tool_input;
+  return toolInput?.file_path ?? '';
+}
+
+function toolMeta(input: unknown): { name?: string; tool_input?: unknown } {
+  return input as { tool_name?: string; tool_input?: unknown };
+}
+
 export function createDevHooks(input: {
   api: OrchestratorApi;
   loopId: string;
@@ -13,14 +27,14 @@ export function createDevHooks(input: {
       {
         matcher: 'Bash',
         hooks: [
-          async (ctx: { tool_input?: { command?: string } }) => {
-            const cmd = ctx.tool_input?.command ?? '';
+          async (hookInput: unknown) => {
+            const cmd = bashCommand(hookInput);
             for (const p of BLOCKED_BASH) {
               if (p.test(cmd)) {
                 return {
                   hookSpecificOutput: {
-                    hookEventName: 'PreToolUse',
-                    permissionDecision: 'deny',
+                    hookEventName: 'PreToolUse' as const,
+                    permissionDecision: 'deny' as const,
                     permissionDecisionReason: `Blocked command: ${cmd}`,
                   },
                 };
@@ -38,13 +52,13 @@ export function createDevHooks(input: {
       {
         matcher: 'Write|Edit',
         hooks: [
-          async (ctx: { tool_input?: { file_path?: string } }) => {
-            const path = ctx.tool_input?.file_path ?? '';
+          async (hookInput: unknown) => {
+            const path = filePath(hookInput);
             if (!path.startsWith(input.workspacePath) && !path.includes('loop-')) {
               return {
                 hookSpecificOutput: {
-                  hookEventName: 'PreToolUse',
-                  permissionDecision: 'deny',
+                  hookEventName: 'PreToolUse' as const,
+                  permissionDecision: 'deny' as const,
                   permissionDecisionReason: 'Path outside workspace',
                 },
               };
@@ -53,8 +67,8 @@ export function createDevHooks(input: {
               if (p.test(path)) {
                 return {
                   hookSpecificOutput: {
-                    hookEventName: 'PreToolUse',
-                    permissionDecision: 'deny',
+                    hookEventName: 'PreToolUse' as const,
+                    permissionDecision: 'deny' as const,
                     permissionDecisionReason: 'Sensitive file blocked',
                   },
                 };
@@ -69,11 +83,12 @@ export function createDevHooks(input: {
       {
         matcher: '.*',
         hooks: [
-          async (ctx: { tool_name?: string; tool_input?: unknown }) => {
+          async (hookInput: unknown) => {
+            const { tool_name, tool_input } = toolMeta(hookInput);
             await input.api.postAudit(input.loopId, {
               agent: 'dev-agent',
-              action: `tool:${ctx.tool_name ?? 'unknown'}`,
-              detail: { input: ctx.tool_input },
+              action: `tool:${tool_name ?? 'unknown'}`,
+              detail: { input: tool_input },
             });
             return {};
           },

@@ -36,6 +36,33 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
 
   const mcpServers = loadMcpServers();
 
+  const opsHooks = {
+    PreToolUse: [
+      {
+        matcher: 'Bash',
+        hooks: [
+          async (hookInput: unknown) => {
+            const cmd =
+              (hookInput as { tool_input?: { command?: string } }).tool_input
+                ?.command ?? '';
+            if (/prod(uction)?/i.test(cmd) && !process.env.OPS_ALLOW_PROD) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse' as const,
+                  permissionDecision: 'deny' as const,
+                  permissionDecisionReason:
+                    'Production deploy requires Human approval',
+                },
+              };
+            }
+            await api.postAudit(input.loopId, 'bash', { command: cmd });
+            return {};
+          },
+        ],
+      },
+    ],
+  };
+
   for await (const message of query({
     prompt,
     options: {
@@ -46,29 +73,8 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
       resume: sessionId,
       env,
       ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
-      hooks: {
-        PreToolUse: [
-          {
-            matcher: 'Bash',
-            hooks: [
-              async (ctx: { tool_input?: { command?: string } }) => {
-                const cmd = ctx.tool_input?.command ?? '';
-                if (/prod(uction)?/i.test(cmd) && !process.env.OPS_ALLOW_PROD) {
-                  return {
-                    hookSpecificOutput: {
-                      hookEventName: 'PreToolUse',
-                      permissionDecision: 'deny',
-                      permissionDecisionReason: 'Production deploy requires Human approval',
-                    },
-                  };
-                }
-                await api.postAudit(input.loopId, 'bash', { command: cmd });
-                return {};
-              },
-            ],
-          },
-        ],
-      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hooks: opsHooks as any,
     },
   })) {
     if (input.signal?.aborted) break;
