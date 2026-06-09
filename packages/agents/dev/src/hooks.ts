@@ -13,7 +13,7 @@ function filePath(input: unknown): string {
   return toolInput?.file_path ?? '';
 }
 
-function toolMeta(input: unknown): { name?: string; tool_input?: unknown } {
+function toolMeta(input: unknown): { tool_name?: string; tool_input?: unknown } {
   return input as { tool_name?: string; tool_input?: unknown };
 }
 
