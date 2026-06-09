@@ -1,0 +1,39 @@
+# Gateway — 仓库根目录构建: docker build -f Dockerfile.gateway -t loop-gateway .
+
+FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
+
+WORKDIR /app
+
+COPY packages/shared/package.json ./packages/shared/package.json
+COPY package.json ./
+COPY packages/shared ./packages/shared
+COPY packages/gateway ./packages/gateway
+
+RUN npm install
+RUN npm run build -w @loop/shared && npm run build -w @loop/gateway
+
+FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV WS_PORT=3001
+ENV ORCHESTRATOR_URL=http://loop-orchestrator:3000
+
+COPY package.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/gateway/package.json ./packages/gateway/
+
+RUN npm install --omit=dev
+
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/gateway/dist ./packages/gateway/dist
+
+WORKDIR /app/packages/gateway
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3001/health || exit 1
+
+CMD ["node", "dist/main.js"]

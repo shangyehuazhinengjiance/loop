@@ -114,14 +114,14 @@ npm run e2e
 
 | 服务 | Dockerfile |
 |------|------------|
-| orchestrator | `packages/orchestrator/Dockerfile` |
-| gateway | `packages/gateway/Dockerfile` |
-| web | `packages/web/Dockerfile` |
+| orchestrator | **`Dockerfile`**（仓库根） |
+| gateway | **`Dockerfile.gateway`** |
+| web | **`Dockerfile.web`** |
 
 详细构建命令、环境变量、K8s 迁移 Job 见 [deploy/DOCKER.md](./deploy/DOCKER.md)。
 
 ```bash
-docker build -f packages/orchestrator/Dockerfile -t loop-orchestrator .
+docker build -f Dockerfile -t loop-orchestrator .
 ```
 
 ## 测试

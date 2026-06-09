@@ -7,9 +7,11 @@
 
 | 镜像 | Dockerfile | 端口 | 说明 |
 |------|------------|------|------|
-| `loop-orchestrator` | `packages/orchestrator/Dockerfile` | 3000 | API、状态机、Agent 调度、Git |
-| `loop-gateway` | `packages/gateway/Dockerfile` | 3001 | WebSocket 群聊 |
-| `loop-web` | `packages/web/Dockerfile` | 3002 | Next.js 前端 |
+| `loop-orchestrator` | **`Dockerfile`**（仓库根） | 3000 | API、状态机、Agent 调度、Git |
+| `loop-gateway` | **`Dockerfile.gateway`** | 3001 | WebSocket 群聊 |
+| `loop-web` | **`Dockerfile.web`** | 3002 | Next.js 前端 |
+
+> 备选：`packages/orchestrator/Dockerfile` 内容与根目录 `Dockerfile` 相同，但 **context 仍必须是 `.`**
 
 ## 构建上下文（重要）
 
@@ -19,8 +21,23 @@
 # 正确：最后一个参数是 .
 docker build -f packages/orchestrator/Dockerfile -t loop-orchestrator .
 
-# 错误：会找不到 package.json / packages/*
+# 错误：会报 packages/shared/package.json not found
 docker build -t loop-orchestrator packages/orchestrator
+docker build -f packages/orchestrator/Dockerfile packages/orchestrator
+```
+
+**典型报错与原因：**
+
+```
+COPY failed: stat packages/shared/package.json: file does not exist
+```
+
+→ CI 把 `packages/orchestrator` 当成了 build context，应改为仓库根目录 `.`
+
+**Jenkins 正确写法**（参考仓库根 `Jenkinsfile`）：
+
+```groovy
+sh 'docker build -f Dockerfile -t $IMAGE .'
 ```
 
 Jenkins / GitLab CI 示例：
@@ -41,9 +58,9 @@ script:
 ## 本地构建（在仓库根目录执行）
 
 ```bash
-docker build -f packages/orchestrator/Dockerfile -t loop-orchestrator .
-docker build -f packages/gateway/Dockerfile -t loop-gateway .
-docker build -f packages/web/Dockerfile \
+docker build -f Dockerfile -t loop-orchestrator .
+docker build -f Dockerfile.gateway -t loop-gateway .
+docker build -f Dockerfile.web \
   --build-arg NEXT_PUBLIC_ORCHESTRATOR_URL=https://api.example.com \
   --build-arg NEXT_PUBLIC_WS_URL=wss://ws.example.com \
   -t loop-web .
@@ -54,7 +71,7 @@ docker build -f packages/web/Dockerfile \
 ### 1. orchestrator
 
 ```bash
-docker build -f packages/orchestrator/Dockerfile -t $REGISTRY/loop-orchestrator:$TAG .
+docker build -f Dockerfile -t $REGISTRY/loop-orchestrator:$TAG .
 docker push $REGISTRY/loop-orchestrator:$TAG
 ```
 
@@ -70,7 +87,7 @@ kubectl run loop-migrate --rm -it --restart=Never \
 ### 2. gateway
 
 ```bash
-docker build -f packages/gateway/Dockerfile -t $REGISTRY/loop-gateway:$TAG .
+docker build -f Dockerfile.gateway -t $REGISTRY/loop-gateway:$TAG .
 docker push $REGISTRY/loop-gateway:$TAG
 ```
 
@@ -84,7 +101,7 @@ docker push $REGISTRY/loop-gateway:$TAG
 ### 3. web
 
 ```bash
-docker build -f packages/web/Dockerfile \
+docker build -f Dockerfile.web \
   --build-arg NEXT_PUBLIC_ORCHESTRATOR_URL=https://api.example.com \
   --build-arg NEXT_PUBLIC_WS_URL=wss://ws.example.com \
   -t $REGISTRY/loop-web:$TAG .

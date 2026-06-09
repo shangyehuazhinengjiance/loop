@@ -1,20 +1,18 @@
-# 已迁移到仓库根目录 Dockerfile，避免 CI 将本目录当作 build context 导致 COPY 失败。
+# AI Native Loop — Orchestrator（请在仓库根目录构建）
 #
-# 请在仓库根目录执行：
 #   docker build -f Dockerfile -t loop-orchestrator .
+#                                 最后一个参数必须是 .
 #
-# 不要使用：
-#   docker build -f packages/orchestrator/Dockerfile packages/orchestrator  ❌
-#
-# 若流水线只能写 Dockerfile 路径，请保持 context 为仓库根：
-#   docker build -f packages/orchestrator/Dockerfile -t loop-orchestrator .
-#   （注意最后一个参数是 . 不是 packages/orchestrator）
+# 若报错 packages/shared/package.json not found，
+# 说明 CI 的 build context 不是仓库根目录，请改 Jenkinsfile（见仓库根 Jenkinsfile）。
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
 
 WORKDIR /app
 
+# 校验 build context（缺少则说明 context 不是仓库根目录）
 COPY packages/shared/package.json ./packages/shared/package.json
+
 COPY package.json ./
 COPY packages ./packages
 COPY config ./config
