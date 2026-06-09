@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loop-migrate
+  namespace: loop
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: harbor.qihoo.net/ai-native/loop-orchestrator:latest
+          imagePullPolicy: Always
+          command: ["node", "dist/db/migrate.js"]
+          envFrom:
+            - secretRef:
+                name: loop-secrets

@@ -118,7 +118,8 @@ npm run e2e
 | gateway | **`Dockerfile.gateway`** |
 | web | **`Dockerfile.web`** |
 
-详细构建命令、环境变量、K8s 迁移 Job 见 [deploy/DOCKER.md](./deploy/DOCKER.md)。
+详细构建命令、环境变量见 [deploy/DOCKER.md](./deploy/DOCKER.md)。  
+K8s Deployment 分步指南与 YAML 清单见 [deploy/K8S.md](./deploy/K8S.md)。
 
 ```bash
 docker build -f Dockerfile -t loop-orchestrator .

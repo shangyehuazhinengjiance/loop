@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+deploy/k8s/secret.yaml
 workspaces/
 *.log
 .DS_Store

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loop-orchestrator
+  namespace: loop
+  labels:
+    app: loop-orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loop-orchestrator
+  template:
+    metadata:
+      labels:
+        app: loop-orchestrator
+    spec:
+      # imagePullSecrets:
+      #   - name: harbor-registry
+      containers:
+        - name: orchestrator
+          image: harbor.qihoo.net/ai-native/loop-orchestrator:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: loop-config
+            - secretRef:
+                name: loop-secrets
+          volumeMounts:
+            - name: workspaces
+              mountPath: /data/workspaces
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: loop-workspaces
