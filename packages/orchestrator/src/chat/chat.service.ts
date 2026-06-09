@@ -12,7 +12,9 @@ const DISPLAY_NAMES: Record<string, string> = {
 
 @Injectable()
 export class ChatService extends EventEmitter {
-  constructor(private readonly messageRepo: MessageRepository) {}
+  constructor(private readonly messageRepo: MessageRepository) {
+    super();
+  }
 
   async listMessages(
     loopId: string,

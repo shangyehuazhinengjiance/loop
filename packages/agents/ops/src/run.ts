@@ -1,4 +1,4 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import type { Phase, ResolvedModelConfig } from '@loop/shared';
 import { buildOpsPrompt } from './prompts.js';
 import { OrchestratorApi } from './orchestrator-api.js';
@@ -12,11 +12,11 @@ export interface RunOpsAgentInput {
   signal?: AbortSignal;
 }
 
-function loadMcpServers(): Record<string, unknown> {
+function loadMcpServers(): NonNullable<Options['mcpServers']> {
   const raw = process.env.OPS_MCP_SERVERS;
   if (!raw) return {};
   try {
-    return JSON.parse(raw) as Record<string, unknown>;
+    return JSON.parse(raw) as NonNullable<Options['mcpServers']>;
   } catch {
     return {};
   }
