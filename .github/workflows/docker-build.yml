@@ -10,6 +10,7 @@ on:
 
 env:
   REGISTRY: harbor.qihoo.net/ai-native
+  DOCKER_BUILDKIT: "1"
   # 按实际修改；不 push 时可只 build
 
 jobs:

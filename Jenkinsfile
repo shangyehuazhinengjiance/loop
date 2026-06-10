@@ -7,6 +7,8 @@ pipeline {
 
   environment {
     REGISTRY = 'harbor.qihoo.net/your-namespace'
+    // Dockerfile 使用 RUN --mount=type=cache，必须启用 BuildKit（Docker 18.09+）
+    DOCKER_BUILDKIT = '1'
   }
 
   stages {
@@ -22,6 +24,7 @@ pipeline {
     stage('Build Orchestrator') {
       steps {
         sh '''
+          export DOCKER_BUILDKIT=1
           docker build -f Dockerfile -t ${REGISTRY}/loop-orchestrator:${BUILD_NUMBER} .
         '''
       }

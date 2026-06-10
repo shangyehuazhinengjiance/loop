@@ -13,6 +13,19 @@
 
 > 备选：`packages/orchestrator/Dockerfile` 内容与根目录 `Dockerfile` 相同，但 **context 仍必须是 `.`**
 
+## BuildKit（必须）
+
+根目录 `Dockerfile` / `Dockerfile.gateway` / `Dockerfile.web` 使用 `RUN --mount=type=cache` 缓存 npm，**构建时必须启用 BuildKit**：
+
+```bash
+export DOCKER_BUILDKIT=1
+docker build -f Dockerfile -t loop-orchestrator .
+```
+
+Jenkins：在 `environment { DOCKER_BUILDKIT = '1' }` 或 `sh` 里 `export DOCKER_BUILDKIT=1`（见仓库根 `Jenkinsfile`）。
+
+若仍报错，检查 Docker 版本 ≥ 18.09；极老环境可改用 `docker buildx build`（默认启用 BuildKit）。
+
 ## 构建上下文（重要）
 
 **必须把仓库根目录 `.` 作为 build context**，不能只传 `packages/orchestrator`：
