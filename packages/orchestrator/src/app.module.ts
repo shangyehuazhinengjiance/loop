@@ -23,6 +23,7 @@ import { ModelRouter } from './model/model-router.js';
 import { PhaseService } from './phase/phase.service.js';
 import { ReplayService } from './replay/replay.service.js';
 import { SandboxService } from './sandbox/sandbox.service.js';
+import { CodebaseSummaryService } from './codebase/codebase-summary.service.js';
 
 @Module({
   controllers: [LoopController, AgentController, ChatSseController],
@@ -48,6 +49,7 @@ import { SandboxService } from './sandbox/sandbox.service.js';
     AuditService,
     ReplayService,
     SandboxService,
+    CodebaseSummaryService,
   ],
 })
 export class AppModule {}

@@ -8,6 +8,7 @@ import { ChatService } from '../chat/chat.service.js';
 import { PhaseService } from '../phase/phase.service.js';
 import { GitService } from '../git/git.service.js';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
+import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
 
 @Injectable()
 export class LoopService {
@@ -18,6 +19,7 @@ export class LoopService {
     private readonly phaseService: PhaseService,
     private readonly gitService: GitService,
     private readonly agentCoordinator: AgentCoordinator,
+    private readonly codebaseSummary: CodebaseSummaryService,
   ) {}
 
   async createLoop(projectId: string, title: string): Promise<LoopRow> {
@@ -33,15 +35,28 @@ export class LoopService {
 
     const gitConfig = project.git_config as { remoteUrl?: string } | undefined;
     try {
-      await this.gitService.initLoopWorkspace(loop.id);
+      const initResult = await this.gitService.initLoopWorkspace(loop.id);
       if (gitConfig?.remoteUrl) {
+        const summary = await this.tryEnsureCodebaseSummary({
+          projectId,
+          loopId: loop.id,
+          workspacePath,
+          gitRef: initResult.gitRef,
+          remoteUrl: gitConfig.remoteUrl,
+          projectModelConfig: project.model_config,
+        });
+        const summaryNote = summary
+          ? summary.cached
+            ? ` 已复用项目代码库摘要（${summary.path}）。`
+            : ` 已生成代码库摘要（${summary.path}），Dev Agent 将优先阅读该文件。`
+          : '';
         await this.chatService.publishAgentMessage({
           loopId: loop.id,
           phase: loop.phase,
           agentId: 'orchestrator',
           content: {
             type: 'text',
-            body: `已从 ${gitConfig.remoteUrl} 初始化开发工作区，分支 loop/${loop.id}。`,
+            body: `已从 ${gitConfig.remoteUrl} 初始化开发工作区，分支 loop/${loop.id}。${summaryNote}`,
           },
         });
       }
@@ -82,13 +97,26 @@ export class LoopService {
     }
 
     const result = await this.gitService.reinitLoopWorkspace(loopId);
+    const summary = await this.tryEnsureCodebaseSummary({
+      projectId: loop.project_id,
+      loopId,
+      workspacePath: result.workspacePath,
+      gitRef: result.gitRef,
+      remoteUrl: gitConfig.remoteUrl,
+      projectModelConfig: project?.model_config,
+    });
+    const summaryNote = summary
+      ? summary.cached
+        ? ` 已复用项目代码库摘要（${summary.path}）。`
+        : ` 已重新生成代码库摘要（${summary.path}）。`
+      : '';
     await this.chatService.publishAgentMessage({
       loopId,
       phase: loop.phase,
       agentId: 'orchestrator',
       content: {
         type: 'text',
-        body: `工作区已重新从 ${gitConfig.remoteUrl} 拉取，当前分支 ${result.gitBranch}。`,
+        body: `工作区已重新从 ${gitConfig.remoteUrl} 拉取，当前分支 ${result.gitBranch}。${summaryNote}`,
       },
     });
     return result;
@@ -203,6 +231,22 @@ export class LoopService {
   private extractMentions(body: string): string[] {
     const matches = body.match(/@[\w-]+/g) ?? [];
     return matches;
+  }
+
+  private async tryEnsureCodebaseSummary(input: {
+    projectId: string;
+    loopId: string;
+    workspacePath: string;
+    gitRef?: string;
+    remoteUrl?: string;
+    projectModelConfig?: ProjectModelConfig;
+  }) {
+    try {
+      return await this.codebaseSummary.ensureForLoop(input);
+    } catch (err) {
+      console.warn(`[codebase-summary] failed for loop ${input.loopId}:`, err);
+      return null;
+    }
   }
 
   private parseMention(mention: string): 'pm' | 'dev' | 'ops' | null {
