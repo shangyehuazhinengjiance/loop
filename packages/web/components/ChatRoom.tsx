@@ -154,22 +154,26 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return required !== undefined && phase === required;
   }
 
-  /** 仅在最新的、真正完成的消息上展示审批按钮 */
+  function isLatestDevApproveMessage(message: Message): boolean {
+    const lastDevResult = [...messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.sender.id === 'dev-agent' &&
+          m.content.actions?.some((a) => a.action === 'approve_dev'),
+      );
+    return lastDevResult?.id === message.id;
+  }
+
+  /** 展示审批按钮（含不可用态，避免「文案让点但按钮消失」） */
   function shouldShowAction(action: string, message: Message): boolean {
-    if (!isActionAvailable(action)) return false;
     if (action === 'approve_dev') {
-      // 仅 Dev 最终交付（artifact）展示；中间进度消息 type=text
-      if (message.content.type !== 'artifact') return false;
-      const lastDevResult = [...messages]
-        .reverse()
-        .find(
-          (m) =>
-            m.sender.id === 'dev-agent' &&
-            m.content.type === 'artifact' &&
-            m.content.actions?.some((a) => a.action === 'approve_dev'),
-        );
-      return lastDevResult?.id === message.id;
+      if (!message.content.actions?.some((a) => a.action === 'approve_dev')) {
+        return false;
+      }
+      return isLatestDevApproveMessage(message);
     }
+    if (!isActionAvailable(action)) return false;
     if (action === 'approve_prd') {
       return message.content.type === 'artifact';
     }
@@ -183,6 +187,20 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       return lastDeploy?.id === message.id;
     }
     return true;
+  }
+
+  function isActionClickable(action: string): boolean {
+    return isActionAvailable(action);
+  }
+
+  function actionDisabledHint(action: string): string | undefined {
+    if (!isActionAvailable(action)) {
+      const required = ACTION_REQUIRED_PHASE[action];
+      if (required) {
+        return `当前阶段为 ${phase}，需处于 ${required} 阶段。请使用顶部「回退」后再操作。`;
+      }
+    }
+    return undefined;
   }
 
   async function approve(action: string) {
@@ -458,23 +476,36 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             </div>
             {m.content.actions
               ?.filter((a) => shouldShowAction(a.action, m))
-              .map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => approve(a.action)}
-                  style={{
-                    marginTop: 8,
-                    marginRight: 8,
-                    padding: '6px 12px',
-                    borderRadius: 6,
-                    border: '1px solid #238636',
-                    background: 'transparent',
-                    color: '#3fb950',
-                  }}
-                >
-                  {a.label}
-                </button>
-              ))}
+              .map((a) => {
+                const clickable = isActionClickable(a.action);
+                const hint = actionDisabledHint(a.action);
+                return (
+                  <div key={a.id} style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => clickable && approve(a.action)}
+                      disabled={!clickable}
+                      title={hint}
+                      style={{
+                        marginRight: 8,
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        border: `1px solid ${clickable ? '#238636' : '#484f58'}`,
+                        background: 'transparent',
+                        color: clickable ? '#3fb950' : '#8b949e',
+                        cursor: clickable ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                    {hint && (
+                      <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>
+                        {hint}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         ))}
         <div ref={bottomRef} />

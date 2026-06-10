@@ -184,6 +184,18 @@ export class AgentRunnerService implements OnModuleInit {
     }
 
     if (agent === 'dev') {
+      if (loop.phase !== 'development') {
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: `Dev Agent 仅在 **development** 阶段工作。当前阶段为 \`${loop.phase}\`，请使用顶部「回退」到 development 后再 @dev-agent。`,
+          },
+        });
+        return;
+      }
       if (!model.apiKey?.trim()) {
         throw new Error('DEV_MODEL_API_KEY 未配置，Dev Agent 无法启动');
       }

@@ -132,15 +132,24 @@ export async function runDevAgentClaude(input: {
 
       const mapped = mapSdkMessageToChat(message as { type: string; [key: string]: unknown });
       if (mapped) {
-        const actions =
-          mapped.sdkMessageType === 'result'
-            ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' as const }]
-            : undefined;
+        let actions: { id: string; label: string; action: 'approve_dev' }[] | undefined;
+        let body = mapped.body;
+        let msgPhase = input.phase;
+
+        if (mapped.sdkMessageType === 'result') {
+          const loop = await input.api.getLoop(input.loopId);
+          msgPhase = loop.phase;
+          if (loop.phase === 'development') {
+            actions = [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' }];
+          } else {
+            body = `${body}\n\n（当前处于 \`${loop.phase}\` 阶段，无需开发验收。）`;
+          }
+        }
 
         await input.api.postAgentMessage(
           input.loopId,
-          { type: mapped.type, body: mapped.body, actions },
-          input.phase,
+          { type: mapped.type, body, actions },
+          msgPhase,
           mapped.sdkMessageType,
         );
       }
