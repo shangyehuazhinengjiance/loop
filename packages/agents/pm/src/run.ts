@@ -64,12 +64,35 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
         return;
       }
     }
+    await api.postAgentMessage(
+      input.loopId,
+      {
+        type: 'text',
+        body: 'PM Agent 调用了未支持的工具，未生成 PRD。请重试 @pm-agent。',
+      },
+      loop.phase,
+    );
+    return;
   }
 
-  const text =
-    response.content.find((b) => b.type === 'text')?.type === 'text'
-      ? (response.content.find((b) => b.type === 'text') as { text: string }).text
-      : '';
+  const text = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b.type === 'text' ? (b.text ?? '') : ''))
+    .join('\n')
+    .trim();
+
+  if (!text) {
+    await api.postAgentMessage(
+      input.loopId,
+      {
+        type: 'text',
+        body: 'PM Agent 未返回有效文本（模型响应为空）。请重试 @pm-agent，或检查 PM_MODEL_BASE_URL / PM_MODEL_NAME 配置。',
+      },
+      loop.phase,
+    );
+    return;
+  }
+
   const { prd, tasks } = parsePrdAndTasks(text);
 
   await api.updateContext(input.loopId, {

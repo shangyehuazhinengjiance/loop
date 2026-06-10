@@ -83,15 +83,28 @@ export class OrchestratorApi {
   }
 }
 
-export function parsePrdAndTasks(text: string): {
+export function parsePrdAndTasks(text: string | null | undefined): {
   prd: PRDDocument;
   tasks: Task[];
 } {
-  const prdMatch = text.match(/```markdown\n([\s\S]*?)```/);
-  const prdContent = prdMatch?.[1]?.trim() ?? text;
+  const source = (text ?? '').trim();
+  if (!source) {
+    return {
+      prd: {
+        title: 'PRD',
+        content: '',
+        version: 1,
+        updatedAt: new Date().toISOString(),
+      },
+      tasks: [],
+    };
+  }
+
+  const prdMatch = source.match(/```markdown\n([\s\S]*?)```/);
+  const prdContent = prdMatch?.[1]?.trim() ?? source;
 
   let tasks: Task[] = [];
-  const tasksMatch = text.match(/```json\n([\s\S]*?)```/);
+  const tasksMatch = source.match(/```json\n([\s\S]*?)```/);
   if (tasksMatch?.[1]) {
     try {
       const parsed = JSON.parse(tasksMatch[1]) as Task[];
