@@ -68,7 +68,8 @@ export async function runDevAgentOpenAI(input: {
     },
     {
       role: 'user',
-      content: '请根据 PRD 和任务列表开始开发。先阅读 .loop/codebase-summary.md（若存在）。',
+      content:
+        '请根据 PRD 和任务列表开始开发。可先尝试 read_file 读取 .loop/codebase-summary.md；若不存在则直接 glob/README 了解项目结构。',
     },
   ];
 
@@ -133,7 +134,14 @@ export async function runDevAgentOpenAI(input: {
         detail: { input: args },
       });
 
-      const result = await executeDevTool(input.workspacePath, name, args);
+      let result;
+      try {
+        result = await executeDevTool(input.workspacePath, name, args);
+      } catch (err) {
+        result = {
+          output: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
       messages.push({
         role: 'tool',
         tool_call_id: call.id,

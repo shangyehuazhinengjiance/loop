@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { resolveWorkspacePath, validateBashCommand } from './security.js';
@@ -22,6 +23,14 @@ const MAX_GLOB_RESULTS = 80;
 function truncate(text: string): string {
   if (text.length <= MAX_TOOL_OUTPUT) return text;
   return `${text.slice(0, MAX_TOOL_OUTPUT)}\n…(truncated)`;
+}
+
+function formatFsError(err: unknown, filePath: string): string {
+  const e = err as NodeJS.ErrnoException;
+  if (e.code === 'ENOENT') {
+    return `Error: file not found: ${filePath}（文件不存在，可尝试其他路径或 glob）`;
+  }
+  return `Error: ${e.message ?? String(err)}`;
 }
 
 async function walkFiles(
@@ -166,15 +175,24 @@ export async function executeDevTool(
       const filePath = String(args.file_path ?? '');
       const resolved = resolveWorkspacePath(workspacePath, filePath);
       if (!resolved.ok) return { output: `Error: ${resolved.reason}` };
-      const content = await readFile(resolved.absolute, 'utf-8');
-      return { output: truncate(content) };
+      try {
+        const content = await readFile(resolved.absolute, 'utf-8');
+        return { output: truncate(content) };
+      } catch (err) {
+        return { output: formatFsError(err, filePath) };
+      }
     }
     case 'write_file': {
       const filePath = String(args.file_path ?? '');
       const resolved = resolveWorkspacePath(workspacePath, filePath);
       if (!resolved.ok) return { output: `Error: ${resolved.reason}` };
-      await writeFile(resolved.absolute, String(args.content ?? ''), 'utf-8');
-      return { output: `Wrote ${filePath}`, artifact: true };
+      try {
+        await mkdir(dirname(resolved.absolute), { recursive: true });
+        await writeFile(resolved.absolute, String(args.content ?? ''), 'utf-8');
+        return { output: `Wrote ${filePath}`, artifact: true };
+      } catch (err) {
+        return { output: formatFsError(err, filePath) };
+      }
     }
     case 'edit_file': {
       const filePath = String(args.file_path ?? '');
@@ -182,7 +200,12 @@ export async function executeDevTool(
       const newString = String(args.new_string ?? '');
       const resolved = resolveWorkspacePath(workspacePath, filePath);
       if (!resolved.ok) return { output: `Error: ${resolved.reason}` };
-      const content = await readFile(resolved.absolute, 'utf-8');
+      let content: string;
+      try {
+        content = await readFile(resolved.absolute, 'utf-8');
+      } catch (err) {
+        return { output: formatFsError(err, filePath) };
+      }
       if (!content.includes(oldString)) {
         return { output: `Error: old_string not found in ${filePath}` };
       }
