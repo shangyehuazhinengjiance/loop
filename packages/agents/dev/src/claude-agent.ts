@@ -27,7 +27,7 @@ function mapSdkMessageToChat(
     const result = (message.result ?? message.subtype) as string | undefined;
     return {
       body: typeof result === 'string' ? result : '开发完成',
-      type: 'text',
+      type: 'artifact',
       sdkMessageType: type,
     };
   }

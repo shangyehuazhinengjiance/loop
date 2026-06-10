@@ -30,7 +30,7 @@ interface Message {
   sender: { type: string; id: string; displayName: string };
   content: { type: string; body: string; actions?: Action[] };
   phase: string;
-  metadata?: { timestamp?: string };
+  metadata?: { timestamp?: string; sdkMessageType?: string };
 }
 
 interface LoopBlocker {
@@ -152,6 +152,28 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   function isActionAvailable(action: string): boolean {
     const required = ACTION_REQUIRED_PHASE[action];
     return required !== undefined && phase === required;
+  }
+
+  /** 仅在最新的、真正完成的消息上展示审批按钮 */
+  function shouldShowAction(action: string, message: Message): boolean {
+    if (!isActionAvailable(action)) return false;
+    if (action === 'approve_dev') {
+      // 仅 Dev 最终交付（artifact）展示；中间进度消息 type=text
+      if (message.content.type !== 'artifact') return false;
+      const lastDevResult = [...messages]
+        .reverse()
+        .find(
+          (m) =>
+            m.sender.id === 'dev-agent' &&
+            m.content.type === 'artifact' &&
+            m.content.actions?.some((a) => a.action === 'approve_dev'),
+        );
+      return lastDevResult?.id === message.id;
+    }
+    if (action === 'approve_prd' || action === 'approve_deploy') {
+      return message.content.type === 'artifact';
+    }
+    return true;
   }
 
   async function approve(action: string) {
@@ -426,7 +448,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
               <MarkdownContent content={m.content.body} />
             </div>
             {m.content.actions
-              ?.filter((a) => isActionAvailable(a.action))
+              ?.filter((a) => shouldShowAction(a.action, m))
               .map((a) => (
                 <button
                   key={a.id}
