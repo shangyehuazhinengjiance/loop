@@ -1,0 +1,85 @@
+-- AI Native Loop — 初始 Schema（MySQL 8.0+）
+
+CREATE TABLE projects (
+  id            CHAR(36) PRIMARY KEY,
+  name          VARCHAR(255) NOT NULL,
+  git_config    JSON NOT NULL,
+  model_config  JSON NOT NULL,
+  created_at    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE loops (
+  id              CHAR(36) PRIMARY KEY,
+  project_id      CHAR(36) NOT NULL,
+  title           VARCHAR(512) NOT NULL,
+  status          VARCHAR(64) NOT NULL DEFAULT 'active',
+  phase           VARCHAR(64) NOT NULL DEFAULT 'created',
+  git_branch      VARCHAR(255) NULL,
+  workspace_path  TEXT NULL,
+  context         JSON NOT NULL,
+  model_overrides JSON NULL,
+  created_at      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_loops_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_loops_project_id ON loops(project_id);
+CREATE INDEX idx_loops_phase ON loops(phase);
+
+CREATE TABLE messages (
+  id          CHAR(36) PRIMARY KEY,
+  loop_id     CHAR(36) NOT NULL,
+  phase       VARCHAR(64) NOT NULL,
+  sender_type VARCHAR(64) NOT NULL,
+  sender_id   VARCHAR(255) NOT NULL,
+  content     JSON NOT NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_messages_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_messages_loop_id ON messages(loop_id, created_at);
+
+CREATE TABLE snapshots (
+  id                CHAR(36) PRIMARY KEY,
+  loop_id           CHAR(36) NOT NULL,
+  phase             VARCHAR(64) NOT NULL,
+  label             VARCHAR(255) NULL,
+  prd               JSON NULL,
+  tasks             JSON NULL,
+  git_ref           VARCHAR(255) NULL,
+  git_branch        VARCHAR(255) NULL,
+  dev_session_id    VARCHAR(255) NULL,
+  message_watermark CHAR(36) NULL,
+  created_by        VARCHAR(255) NULL,
+  created_at        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_snapshots_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_snapshots_loop_id ON snapshots(loop_id, created_at DESC);
+
+CREATE TABLE approvals (
+  id          CHAR(36) PRIMARY KEY,
+  loop_id     CHAR(36) NOT NULL,
+  action      VARCHAR(64) NOT NULL,
+  approved_by VARCHAR(255) NOT NULL,
+  note        TEXT NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_approvals_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_approvals_loop_id ON approvals(loop_id);
+
+CREATE TABLE phase_transitions (
+  id          CHAR(36) PRIMARY KEY,
+  loop_id     CHAR(36) NOT NULL,
+  from_phase  VARCHAR(64) NULL,
+  to_phase    VARCHAR(64) NOT NULL,
+  `trigger`   VARCHAR(64) NOT NULL,
+  snapshot_id CHAR(36) NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_phase_transitions_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE,
+  CONSTRAINT fk_phase_transitions_snapshot FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
+);
+
+CREATE INDEX idx_phase_transitions_loop_id ON phase_transitions(loop_id, created_at DESC);

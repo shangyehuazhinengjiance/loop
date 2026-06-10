@@ -1,0 +1,35 @@
+{
+  "name": "@loop/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --import tsx --watch src/main.ts",
+    "start": "node dist/main.js",
+    "migrate": "node --import tsx src/db/migrate.ts",
+    "migrate:prod": "node dist/db/migrate.js",
+    "test": "node --import tsx --test src/**/*.test.ts src/approval/*.test.ts"
+  },
+  "dependencies": {
+    "@loop/agent-dev": "*",
+    "@loop/agent-ops": "*",
+    "@loop/agent-pm": "*",
+    "@loop/shared": "*",
+    "@nestjs/common": "^11.1.3",
+    "@nestjs/core": "^11.1.3",
+    "@nestjs/platform-express": "^11.1.3",
+    "dotenv": "^16.5.0",
+    "mysql2": "^3.14.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "uuid": "^11.1.0",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.30",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

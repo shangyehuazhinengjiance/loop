@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loop-config
+  namespace: loop
+data:
+  # ── Orchestrator ──────────────────────────────────────
+  ORCHESTRATOR_PORT: "3000"
+  # 集群内 Service 地址，Agent 回调用
+  ORCHESTRATOR_URL: "http://loop-orchestrator:3000"
+  WORKSPACE_ROOT: "/data/workspaces"
+
+  # 默认 Git 仓库（Web 创建 Project 时自动用于 clone，Dev Agent 工作区）
+  GIT_DEFAULT_REMOTE_URL: "git@github.com:shangyehuazhinengjiance/loop.git"
+  GIT_DEFAULT_BRANCH: "master"
+  GIT_DEFAULT_CREDENTIAL_REF: "GIT_SSH_KEY_PATH"
+  # 与 orchestrator-deployment 中 git-deploy-key 卷挂载路径一致
+  GIT_SSH_KEY_PATH: "/secrets/git/id_ed25519"
+
+  # PM 模型（非密钥部分）
+  PM_MODEL_BASE_URL: "https://api.anthropic.com"
+  PM_MODEL_NAME: "claude-sonnet-4-20250514"
+
+  # Dev 模型（OpenAI 兼容 API）
+  DEV_MODEL_BASE_URL: "https://api.360.cn"
+  DEV_MODEL_NAME: "google/gemini-2.5-pro"
+  DEV_AGENT_RUNTIME: "client-sdk"
+
+  # Ops 模型
+  OPS_MODEL_BASE_URL: "https://api.anthropic.com"
+  OPS_MODEL_NAME: "claude-sonnet-4-20250514"
+
+  # LiteLLM（可选，不用则删除或留空）
+  # LITELLM_PROXY_URL: "http://litellm:4000/v1"
+
+  # ── Gateway ─────────────────────────────────────────
+  WS_PORT: "3001"
+
+  # ── Web ─────────────────────────────────────────────
+  PORT: "3002"
+  HOSTNAME: "0.0.0.0"

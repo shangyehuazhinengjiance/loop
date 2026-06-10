@@ -1,0 +1,44 @@
+# 域名确定后使用；需集群已安装 Ingress Controller（nginx 等）
+# 复制为 ingress.yaml 并修改 host
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: loop-ingress
+  namespace: loop
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: loop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: loop-web
+                port:
+                  number: 3002
+    - host: api.loop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: loop-orchestrator
+                port:
+                  number: 3000
+    - host: ws.loop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: loop-gateway
+                port:
+                  number: 3001
