@@ -6,6 +6,21 @@ export interface UserIdentity {
 const ID_KEY = 'loop_user_id';
 const NAME_KEY = 'loop_user_name';
 
+/** HTTP 等非安全上下文中 randomUUID 不可用，需降级 */
+function randomIdSuffix(): string {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID().slice(0, 8);
+    }
+    if (typeof crypto.getRandomValues === 'function') {
+      const bytes = new Uint8Array(4);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.slice(-8);
+}
+
 export function loadUserIdentity(): UserIdentity | null {
   if (typeof window === 'undefined') return null;
   const userId = localStorage.getItem(ID_KEY);
@@ -23,7 +38,7 @@ export function saveUserIdentity(displayName: string): UserIdentity {
 
   let userId = localStorage.getItem(ID_KEY);
   if (!userId) {
-    userId = `human-${crypto.randomUUID().slice(0, 8)}`;
+    userId = `human-${randomIdSuffix()}`;
     localStorage.setItem(ID_KEY, userId);
   }
   localStorage.setItem(NAME_KEY, trimmed);
