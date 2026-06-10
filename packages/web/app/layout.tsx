@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI Native Loop',
+  title: 'Loop',
   description: '群聊协作 Loop 平台',
 };
 

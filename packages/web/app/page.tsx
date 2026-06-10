@@ -128,7 +128,7 @@ export default function HomePage() {
 
   return (
     <main style={{ maxWidth: 720, margin: '48px auto', padding: 24 }}>
-      <h1 style={{ marginBottom: 8 }}>AI Native Loop</h1>
+      <h1 style={{ marginBottom: 8 }}>Loop</h1>
       <p style={{ color: '#8b949e', marginBottom: 24 }}>
         群聊协作：PM → Dev → Ops 完整迭代
       </p>
