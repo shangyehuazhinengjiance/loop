@@ -1,0 +1,28 @@
+# =============================================================================
+# 基础镜像 1/4：loop-base-monorepo-builder
+# =============================================================================
+# 含完整 monorepo 开发依赖（npm ci），供 orchestrator / gateway 编译阶段使用。
+#
+# 构建（仓库根目录）：
+#   docker build -f docker/base/Dockerfile.monorepo-builder \
+#     -t $REGISTRY/loop-base-monorepo-builder:$TAG .
+#
+# 何时重建：package-lock.json 或任意 workspace package.json 的 dependencies 变更时
+# =============================================================================
+
+FROM harbor.qihoo.net/library/node:22.16.0-alpine
+
+LABEL org.loop.base-image="monorepo-builder"
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/orchestrator/package.json ./packages/orchestrator/
+COPY packages/gateway/package.json ./packages/gateway/
+COPY packages/web/package.json ./packages/web/
+COPY packages/agents/pm/package.json ./packages/agents/pm/
+COPY packages/agents/dev/package.json ./packages/agents/dev/
+COPY packages/agents/ops/package.json ./packages/agents/ops/
+
+RUN npm ci

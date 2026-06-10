@@ -5,11 +5,26 @@
 
 ## 镜像列表
 
+### 业务镜像
+
 | 镜像 | Dockerfile | 端口 | 说明 |
 |------|------------|------|------|
 | `loop-orchestrator` | **`Dockerfile`**（仓库根） | 3000 | API、状态机、Agent 调度、Git |
 | `loop-gateway` | **`Dockerfile.gateway`** | 3001 | WebSocket 群聊 |
 | `loop-web` | **`Dockerfile.web`** | 3002 | Next.js 前端 |
+
+### 基础镜像（依赖预装，共 4 个）
+
+详见 **[docker/base/README.md](../docker/base/README.md)**。
+
+| 镜像 | 说明 |
+|------|------|
+| `loop-base-monorepo-builder` | monorepo `npm ci`，orchestrator/gateway **编译** |
+| `loop-base-orchestrator-runner` | orchestrator **运行**依赖 + git/bash |
+| `loop-base-gateway-runner` | gateway **运行**依赖 |
+| `loop-base-web-builder` | Next.js **编译**依赖 |
+
+`package-lock.json` 变更时执行 `./scripts/build-base-images.sh` 重建；日常只构建业务镜像并传入 `BASE_REGISTRY` / `BASE_TAG`。
 
 > 备选：`packages/orchestrator/Dockerfile` 内容与根目录 `Dockerfile` 相同，但 **context 仍必须是 `.`**
 

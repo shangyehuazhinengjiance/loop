@@ -1,0 +1,28 @@
+# =============================================================================
+# 基础镜像 2/4：loop-base-orchestrator-runner
+# =============================================================================
+# 含 orchestrator 运行时生产依赖 + git/bash（Dev Agent 需要）。
+#
+# 构建（仓库根目录）：
+#   docker build -f docker/base/Dockerfile.orchestrator-runner \
+#     -t $REGISTRY/loop-base-orchestrator-runner:$TAG .
+# =============================================================================
+
+FROM harbor.qihoo.net/library/node:22.16.0-alpine
+
+LABEL org.loop.base-image="orchestrator-runner"
+
+RUN apk add --no-cache git openssh-client ca-certificates bash
+
+ENV SHELL=/bin/bash
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/orchestrator/package.json ./packages/orchestrator/
+COPY packages/agents/pm/package.json ./packages/agents/pm/
+COPY packages/agents/dev/package.json ./packages/agents/dev/
+COPY packages/agents/ops/package.json ./packages/agents/ops/
+
+RUN npm install --omit=dev
