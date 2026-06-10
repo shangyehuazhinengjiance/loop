@@ -30,6 +30,19 @@ function expandEnv(value: string): string {
   return value.replace(/\$\{(\w+)\}/g, (_, key: string) => process.env[key] ?? '');
 }
 
+/** 创建 Project 时占位符 `default` 表示使用 agents.yaml / 环境变量默认配置 */
+function resolveConfigValue(
+  override: string | undefined,
+  project: string | undefined,
+  yamlDefault: string | undefined,
+): string {
+  const raw = expandEnv(override ?? project ?? yamlDefault ?? '');
+  if (!raw || raw === 'default') {
+    return expandEnv(yamlDefault ?? '');
+  }
+  return raw;
+}
+
 export class ModelRouter {
   private defaults: AgentsYaml | null = null;
 
@@ -58,13 +71,23 @@ export class ModelRouter {
       provider: (override?.provider ??
         project?.provider ??
         defaults.provider) as ModelConfig['provider'],
-      baseUrl: expandEnv(
-        override?.baseUrl ?? project?.baseUrl ?? defaults.base_url ?? '',
-      ) || undefined,
-      model: expandEnv(override?.model ?? project?.model ?? defaults.model),
-      fastModel: expandEnv(
-        override?.fastModel ?? project?.fastModel ?? defaults.fast_model ?? '',
-      ) || undefined,
+      baseUrl:
+        resolveConfigValue(
+          override?.baseUrl,
+          project?.baseUrl,
+          defaults.base_url,
+        ) || undefined,
+      model: resolveConfigValue(
+        override?.model,
+        project?.model,
+        defaults.model,
+      ),
+      fastModel:
+        resolveConfigValue(
+          override?.fastModel,
+          project?.fastModel,
+          defaults.fast_model,
+        ) || undefined,
       apiKeyRef:
         override?.apiKeyRef ?? project?.apiKeyRef ?? defaults.api_key_env,
       maxTokens:

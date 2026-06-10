@@ -38,11 +38,7 @@ export class LoopController {
     return this.loopService.createProject({
       name: body.name,
       gitConfig: body.gitConfig ?? {},
-      modelConfig: (body.modelConfig as never) ?? {
-        pm: { provider: 'openai-compatible', model: 'default', apiKeyRef: 'PM_MODEL_API_KEY' },
-        dev: { provider: 'anthropic', model: 'default', apiKeyRef: 'DEV_MODEL_API_KEY' },
-        ops: { provider: 'anthropic', model: 'default', apiKeyRef: 'OPS_MODEL_API_KEY' },
-      },
+      modelConfig: (body.modelConfig as never) ?? {},
     });
   }
 
