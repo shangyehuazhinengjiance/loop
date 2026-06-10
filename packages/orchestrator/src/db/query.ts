@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { DbPool } from './pool.js';
 
+/** mysql2 execute 接受的参数类型 */
+export type SqlParam = string | number | boolean | Date | Buffer | null;
+export type SqlParams = SqlParam[];
+
 export async function dbQuery<T>(
   pool: DbPool,
   sql: string,
-  params: unknown[] = [],
+  params: SqlParams = [],
 ): Promise<T[]> {
   const [rows] = await pool.execute(sql, params);
   return rows as T[];
@@ -13,7 +17,7 @@ export async function dbQuery<T>(
 export async function dbQueryOne<T>(
   pool: DbPool,
   sql: string,
-  params: unknown[] = [],
+  params: SqlParams = [],
 ): Promise<T | null> {
   const rows = await dbQuery<T>(pool, sql, params);
   return rows[0] ?? null;
@@ -36,7 +40,7 @@ export async function insertReturning<T extends { id: string }>(
   pool: DbPool,
   table: string,
   columns: string[],
-  values: unknown[],
+  values: SqlParams,
 ): Promise<T> {
   const id = randomUUID();
   const cols = ['id', ...columns];
@@ -61,7 +65,7 @@ export async function updateReturning<T extends { id: string }>(
   table: string,
   setSql: string,
   id: string,
-  params: unknown[],
+  params: SqlParams,
 ): Promise<T> {
   await pool.execute(`UPDATE \`${table}\` SET ${setSql} WHERE id = ?`, [
     ...params,
