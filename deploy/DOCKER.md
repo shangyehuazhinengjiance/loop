@@ -35,6 +35,8 @@ docker build --platform linux/amd64 \
 
 `package-lock.json` 变更时重建基础镜像；日常业务构建传入 `BASE_REGISTRY` / `BASE_TAG` 即可。
 
+若基础镜像构建 `npm ci` 报 **package.json and package-lock.json are out of sync**，在仓库根执行 `npm run lockfile:sync`，提交 `package-lock.json` 后重跑。
+
 > 备选：`packages/orchestrator/Dockerfile` 内容与根目录 `Dockerfile` 相同，但 **context 仍必须是 `.`**
 
 ## 公司标准流水线（无需 BuildKit）

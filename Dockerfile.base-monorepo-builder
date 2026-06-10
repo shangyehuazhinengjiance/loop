@@ -8,6 +8,7 @@
 #     -t $REGISTRY/loop-base-monorepo-builder:$TAG .
 #
 # 何时重建：package-lock.json 或 workspace package.json 依赖变更时
+# 若 npm ci 报 lock 不同步：在仓库根执行 npm run lockfile:sync 并提交 package-lock.json
 # =============================================================================
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine
