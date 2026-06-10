@@ -45,6 +45,18 @@ export class WorkspaceJobService {
     return this.jobs.get(jobId);
   }
 
+  getProcessingLabel(loopId: string): string | null {
+    const jobId = this.activeByLoop.get(loopId);
+    if (!jobId) return null;
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    if (job.status === 'pending') return '正在初始化工作区…';
+    if (job.status !== 'running') return null;
+    if (job.step === 'git_clone') return '正在拉取 Git 仓库…';
+    if (job.step === 'codebase_summary') return '正在生成代码库摘要…';
+    return '正在初始化工作区…';
+  }
+
   getLatestForLoop(loopId: string): WorkspaceJob | undefined {
     let latest: WorkspaceJob | undefined;
     for (const job of this.jobs.values()) {
@@ -116,6 +128,7 @@ export class WorkspaceJobService {
       });
     } finally {
       this.activeByLoop.delete(job.loopId);
+      this.chatService.emitProcessing({ loopId: job.loopId, active: false });
     }
   }
 
@@ -146,7 +159,17 @@ export class WorkspaceJobService {
       });
     }
 
-    const gitResult = await this.gitService.reinitLoopWorkspace(loopId);
+    this.chatService.emitProcessing({
+      loopId,
+      active: true,
+      label: '正在拉取 Git 仓库…',
+    });
+    let gitResult: InitWorkspaceResult;
+    try {
+      gitResult = await this.gitService.reinitLoopWorkspace(loopId);
+    } finally {
+      this.chatService.emitProcessing({ loopId, active: false });
+    }
 
     if (opts.jobId) {
       this.patchJob(opts.jobId, { step: 'codebase_summary' });

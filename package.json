@@ -12,7 +12,8 @@
     "dev:web": "npm run dev -w @loop/web",
     "db:migrate": "npm run migrate -w @loop/orchestrator",
     "test": "npm run test --workspaces --if-present",
-    "e2e": "powershell -File scripts/e2e-smoke.ps1"
+    "e2e": "powershell -File scripts/e2e-smoke.ps1",
+    "lockfile:sync": "node scripts/sync-lockfile.mjs"
   },
   "engines": {
     "node": ">=20"

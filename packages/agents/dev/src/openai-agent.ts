@@ -86,6 +86,7 @@ export async function runDevAgentOpenAI(input: {
   const tools = [...DEV_TOOL_DEFINITIONS, REQUEST_HUMAN_HELP_TOOL];
   let finalText = '';
   let humanBlocked = false;
+  let toolsExecuted = 0;
 
   for (let turn = 0; turn < maxTurns(); turn++) {
     if (input.signal?.aborted) break;
@@ -125,7 +126,25 @@ export async function runDevAgentOpenAI(input: {
     });
 
     if (toolCalls.length === 0) {
-      finalText = assistant.content?.trim() ?? '开发完成';
+      const text = assistant.content?.trim() ?? '';
+      // 模型只说话不调工具：继续推进，避免首轮就误发「验收通过」
+      if (toolsExecuted === 0 && turn < maxTurns() - 1) {
+        if (text) {
+          await input.api.postAgentMessage(
+            input.loopId,
+            { type: 'text', body: text },
+            input.phase,
+            'assistant',
+          );
+        }
+        messages.push({
+          role: 'user',
+          content:
+            '请使用 read_file / write_file / edit_file / bash 等工具实际执行开发任务，不要只描述计划。全部完成并跑过测试后再给出总结。',
+        });
+        continue;
+      }
+      finalText = text || (toolsExecuted > 0 ? '开发完成' : '未达到最低工具执行要求');
       break;
     }
 
@@ -180,6 +199,7 @@ export async function runDevAgentOpenAI(input: {
         tool_call_id: call.id,
         content: result.output,
       });
+      toolsExecuted += 1;
     }
 
     if (humanBlocked) break;
@@ -189,16 +209,25 @@ export async function runDevAgentOpenAI(input: {
     }
   }
 
+  const loop = await input.api.getLoop(input.loopId);
+  const inDevPhase = loop.phase === 'development';
+  const canApprove = !humanBlocked && toolsExecuted > 0 && inDevPhase;
+  const body =
+    finalText ||
+    (toolsExecuted > 0 ? '开发完成' : '开发未完成：模型未实际调用工具。请重试 @dev-agent。');
+
   await input.api.postAgentMessage(
     input.loopId,
     {
-      type: 'text',
-      body: finalText || '开发完成',
-      actions: humanBlocked
-        ? undefined
-        : [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' }],
+      type: canApprove ? 'artifact' : 'text',
+      body: inDevPhase
+        ? body
+        : `${body}\n\n（当前 Loop 处于 \`${loop.phase}\` 阶段，无需开发验收；若需重新验收请先回退到 development。）`,
+      actions: canApprove
+        ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' }]
+        : undefined,
     },
-    input.phase,
-    humanBlocked ? 'blocked' : 'result',
+    loop.phase,
+    humanBlocked ? 'blocked' : canApprove ? 'result' : 'incomplete',
   );
 }

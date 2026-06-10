@@ -54,8 +54,14 @@ function ensureLoopSse(loopId: string): void {
         const payload = JSON.parse(data) as {
           type: string;
           message?: LoopMessage;
+          active?: boolean;
+          label?: string;
+          agent?: string;
         };
         if (payload.type === 'message' && payload.message) {
+          broadcast(loopId, payload);
+        }
+        if (payload.type === 'processing') {
           broadcast(loopId, payload);
         }
       } catch {
@@ -135,6 +141,7 @@ wss.on('connection', async (ws, req: IncomingMessage) => {
           parsed.displayName,
           parsed.mentions,
         );
+        ws.send(JSON.stringify({ type: 'ack' }));
       }
     } catch (err) {
       ws.send(

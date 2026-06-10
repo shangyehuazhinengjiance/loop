@@ -17,10 +17,10 @@ describe('PhaseStateMachine', () => {
     assert.equal(result.activateAgent, 'dev');
   });
 
-  it('approve_dev: development → deployment', () => {
+  it('approve_dev: development → deployment (no auto ops agent)', () => {
     const result = sm.transition('development', 'approve_dev');
     assert.equal(result.toPhase, 'deployment');
-    assert.equal(result.activateAgent, 'ops');
+    assert.equal(result.activateAgent, undefined);
   });
 
   it('approve_deploy: deployment → done', () => {

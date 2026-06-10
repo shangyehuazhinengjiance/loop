@@ -29,10 +29,10 @@ const ROLLBACK_TARGETS: Partial<Record<Phase, Phase[]>> = {
 };
 
 /** 进入某阶段时应激活的 Agent */
+/** 进入某阶段时自动激活的 Agent（deployment 由 orchestrator 推 test 分支 + @人，不跑 Ops LLM） */
 export const PHASE_AGENT: Partial<Record<Phase, 'pm' | 'dev' | 'ops'>> = {
   requirement: 'pm',
   development: 'dev',
-  deployment: 'ops',
 };
 
 export interface TransitionResult {

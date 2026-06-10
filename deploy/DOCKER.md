@@ -5,13 +5,45 @@
 
 ## 镜像列表
 
+### 业务镜像
+
 | 镜像 | Dockerfile | 端口 | 说明 |
 |------|------------|------|------|
 | `loop-orchestrator` | **`Dockerfile`**（仓库根） | 3000 | API、状态机、Agent 调度、Git |
 | `loop-gateway` | **`Dockerfile.gateway`** | 3001 | WebSocket 群聊 |
 | `loop-web` | **`Dockerfile.web`** | 3002 | Next.js 前端 |
 
+### 基础镜像（依赖预装，共 4 个，Dockerfile 在仓库根目录）
+
+与业务镜像相同：**context 均为 `.`**，公司流水线只需改 Dockerfile 文件名。
+
+| 镜像 | Dockerfile（仓库根） | 说明 |
+|------|----------------------|------|
+| `loop-base-monorepo-builder` | **`Dockerfile.base-monorepo-builder`** | monorepo `npm ci`，orchestrator/gateway 编译 |
+| `loop-base-orchestrator-runner` | **`Dockerfile.base-orchestrator-runner`** | orchestrator 运行依赖 + git/bash |
+| `loop-base-gateway-runner` | **`Dockerfile.base-gateway-runner`** | gateway 运行依赖 |
+| `loop-base-web-builder` | **`Dockerfile.base-web-builder`** | Next.js 编译依赖 |
+
+```bash
+# 示例（与 Dockerfile 业务构建相同，仅 -f 不同）
+docker build --platform linux/amd64 \
+  -f Dockerfile.base-monorepo-builder \
+  -t $REGISTRY/loop-base-monorepo-builder:$TAG .
+
+./scripts/build-base-images.sh   # 一次构建并 push 四个基础镜像
+```
+
+`package-lock.json` 变更时重建基础镜像；日常业务构建传入 `BASE_REGISTRY` / `BASE_TAG` 即可。
+
+若基础镜像构建 `npm ci` 报 **package.json and package-lock.json are out of sync**，在仓库根执行 `npm run lockfile:sync`，提交 `package-lock.json` 后重跑。
+
 > 备选：`packages/orchestrator/Dockerfile` 内容与根目录 `Dockerfile` 相同，但 **context 仍必须是 `.`**
+
+## 公司标准流水线（无需 BuildKit）
+
+三个 Dockerfile **头部注释**已写明构建命令。使用标准 `docker build` 即可，**不需要** `DOCKER_BUILDKIT=1`，兼容 Docker 18.09+。
+
+依赖加速靠 **分层 COPY**（先 `package.json` + `package-lock.json`，再 `npm ci` / `npm install`，最后拷源码），锁文件未变时复用镜像层。
 
 ## 构建上下文（重要）
 

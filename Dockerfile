@@ -1,24 +1,29 @@
-# AI Native Loop — Orchestrator（请在仓库根目录构建）
+# =============================================================================
+# AI Native Loop — Orchestrator 镜像
+# =============================================================================
+# 【推荐】使用预装依赖的基础镜像（见 deploy/DOCKER.md）：
 #
-#   docker build -f Dockerfile -t loop-orchestrator .
-#                                 最后一个参数必须是 .
+#   docker build -f Dockerfile \
+#     --build-arg BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native \
+#     --build-arg BASE_TAG=latest \
+#     -t loop-orchestrator .
 #
-# 若报错 packages/shared/package.json not found，
-# 说明 CI 的 build context 不是仓库根目录，请改 Jenkinsfile（见仓库根 Jenkinsfile）。
+# BASE_REGISTRY / BASE_TAG：与已推送的 loop-base-* 基础镜像一致。
+# package-lock.json 变更后需先重建基础镜像：./scripts/build-base-images.sh
+#
+# 构建 context 必须是仓库根目录 .
+# =============================================================================
 
-FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
+ARG BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native
+ARG BASE_TAG=latest
+
+FROM ${BASE_REGISTRY}/loop-base-monorepo-builder:${BASE_TAG} AS builder
 
 WORKDIR /app
 
-# 校验 build context（缺少则说明 context 不是仓库根目录）
-COPY packages/shared/package.json ./packages/shared/package.json
-
-COPY package.json ./
 COPY packages ./packages
 COPY config ./config
 COPY migrations ./migrations
-
-RUN npm install
 
 RUN npm run build -w @loop/shared \
  && npm run build -w @loop/agent-pm \
@@ -26,26 +31,9 @@ RUN npm run build -w @loop/shared \
  && npm run build -w @loop/agent-ops \
  && npm run build -w @loop/orchestrator
 
-FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
+FROM ${BASE_REGISTRY}/loop-base-orchestrator-runner:${BASE_TAG} AS runner
 
-# Claude Agent SDK 的 Bash 工具需要 POSIX shell（Alpine 默认仅 sh）
-RUN apk add --no-cache git openssh-client ca-certificates bash
-
-ENV SHELL=/bin/bash
-
-WORKDIR /app
-
-ENV NODE_ENV=production
 ENV ORCHESTRATOR_PORT=3000
-
-COPY package.json ./
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/orchestrator/package.json ./packages/orchestrator/
-COPY packages/agents/pm/package.json ./packages/agents/pm/
-COPY packages/agents/dev/package.json ./packages/agents/dev/
-COPY packages/agents/ops/package.json ./packages/agents/ops/
-
-RUN npm install --omit=dev
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/agents/pm/dist ./packages/agents/pm/dist

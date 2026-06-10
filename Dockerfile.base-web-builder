@@ -1,0 +1,17 @@
+# =============================================================================
+# 基础镜像 4/4：loop-base-web-builder
+# =============================================================================
+#   docker build --platform linux/amd64 \
+#     -f Dockerfile.base-web-builder \
+#     -t $REGISTRY/loop-base-web-builder:$TAG .
+# =============================================================================
+
+FROM harbor.qihoo.net/library/node:22.16.0-alpine
+
+LABEL org.loop.base-image="web-builder"
+
+WORKDIR /app/packages/web
+
+COPY packages/web/package.json ./
+RUN mkdir -p public
+RUN npm install

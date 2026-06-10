@@ -38,6 +38,13 @@ export class AgentRunnerService implements OnModuleInit {
     private readonly memberService: LoopMemberService,
   ) {}
 
+  getRunningAgent(loopId: string): AgentRole | null {
+    for (const agent of ['pm', 'dev', 'ops'] as const) {
+      if (this.running.has(`${loopId}:${agent}`)) return agent;
+    }
+    return null;
+  }
+
   onModuleInit() {
     this.coordinator.on('agent:activate', (event: AgentActivateEvent) => {
       void this.handleActivate(event);
@@ -53,6 +60,7 @@ export class AgentRunnerService implements OnModuleInit {
     const key = `${event.loopId}:${event.agent}`;
     if (this.running.has(key)) return;
     this.running.add(key);
+    this.emitAgentProcessing(event.loopId, event.agent, true);
 
     const abort = new AbortController();
     this.abortControllers.set(key, abort);
@@ -78,7 +86,17 @@ export class AgentRunnerService implements OnModuleInit {
     } finally {
       this.running.delete(key);
       this.abortControllers.delete(key);
+      this.emitAgentProcessing(event.loopId, event.agent, false);
     }
+  }
+
+  private emitAgentProcessing(loopId: string, agent: AgentRole, active: boolean): void {
+    this.chatService.emitProcessing({
+      loopId,
+      active,
+      agent: active ? agent : undefined,
+      label: active ? `${this.agentLabel(agent)} 正在处理…` : undefined,
+    });
   }
 
   private agentLabel(agent: AgentRole): string {
@@ -184,6 +202,18 @@ export class AgentRunnerService implements OnModuleInit {
     }
 
     if (agent === 'dev') {
+      if (loop.phase !== 'development') {
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: `Dev Agent 仅在 **development** 阶段工作。当前阶段为 \`${loop.phase}\`，请使用顶部「回退」到 development 后再 @dev-agent。`,
+          },
+        });
+        return;
+      }
       if (!model.apiKey?.trim()) {
         throw new Error('DEV_MODEL_API_KEY 未配置，Dev Agent 无法启动');
       }
