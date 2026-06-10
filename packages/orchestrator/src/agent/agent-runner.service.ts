@@ -51,13 +51,19 @@ export class AgentRunnerService implements OnModuleInit {
       if (abort.signal.aborted) return;
       console.error(`[agent-runner] ${key} failed`, err);
       const loop = await this.loopRepo.findById(event.loopId);
+      const detail =
+        err instanceof Error ? err.message : String(err);
+      const runtimeHint =
+        event.agent === 'dev'
+          ? '\n\n排查：在 Pod 执行 `echo $DEV_AGENT_RUNTIME`（应为 client-sdk）；`kubectl logs` 中应有 `runtime=client-sdk`。若仍是 agent-sdk，请重建 orchestrator 镜像并 rollout。'
+          : '';
       await this.chatService.publishAgentMessage({
         loopId: event.loopId,
         phase: loop?.phase ?? 'requirement',
         agentId: `${event.agent}-agent`,
         content: {
           type: 'text',
-          body: `Agent 执行失败: ${err instanceof Error ? err.message : String(err)}`,
+          body: `Agent 执行失败: ${detail}${runtimeHint}`,
         },
       });
     } finally {

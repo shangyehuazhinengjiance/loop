@@ -113,7 +113,10 @@ export class ModelRouter {
       if (devRuntime === 'client-sdk' || devRuntime === 'agent-sdk') {
         runtime = devRuntime;
       } else if (!defaults.runtime || defaults.runtime === 'agent-sdk') {
-        // 默认 OpenAI 兼容模式，避免强依赖 Claude Code
+        runtime = 'client-sdk';
+      }
+      // 非 Claude 模型无法使用 Claude Code，强制 OpenAI 工具循环
+      if (!merged.model.toLowerCase().includes('claude')) {
         runtime = 'client-sdk';
       }
     }

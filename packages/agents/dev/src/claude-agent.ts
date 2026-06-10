@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ResolvedModelConfig } from '@loop/shared';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildDevPrompt } from './prompts.js';
 import { createDevHooks, DEV_SUBAGENTS } from './hooks.js';
@@ -104,43 +105,75 @@ export async function runDevAgentClaude(input: {
     ? join('/tmp', `claude-dev-${input.loopId}.log`)
     : undefined;
 
-  const stream = query({
-    prompt,
-    options: {
-      model: input.model.model,
-      cwd: input.workspacePath,
-      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent'],
-      permissionMode: devPermissionMode(),
-      resume: sessionId,
-      env,
-      ...(debugEnabled ? { debug: true, debugFile } : {}),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hooks: hooks as any,
-      agents: DEV_SUBAGENTS,
-    },
-  });
+  let stream;
+  try {
+    stream = query({
+      prompt,
+      options: {
+        model: input.model.model,
+        cwd: input.workspacePath,
+        allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent'],
+        permissionMode: devPermissionMode(),
+        resume: sessionId,
+        env,
+        ...(debugEnabled ? { debug: true, debugFile } : {}),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        hooks: hooks as any,
+        agents: DEV_SUBAGENTS,
+      },
+    });
+  } catch (err) {
+    throw await enrichClaudeError(err, input.workspacePath, debugFile);
+  }
 
-  for await (const message of stream) {
-    if (input.signal?.aborted) break;
+  try {
+    for await (const message of stream) {
+      if (input.signal?.aborted) break;
 
-    const mapped = mapSdkMessageToChat(message as { type: string; [key: string]: unknown });
-    if (mapped) {
-      const actions =
-        mapped.sdkMessageType === 'result'
-          ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' as const }]
-          : undefined;
+      const mapped = mapSdkMessageToChat(message as { type: string; [key: string]: unknown });
+      if (mapped) {
+        const actions =
+          mapped.sdkMessageType === 'result'
+            ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' as const }]
+            : undefined;
 
-      await input.api.postAgentMessage(
-        input.loopId,
-        { type: mapped.type, body: mapped.body, actions },
-        input.phase,
-        mapped.sdkMessageType,
-      );
+        await input.api.postAgentMessage(
+          input.loopId,
+          { type: mapped.type, body: mapped.body, actions },
+          input.phase,
+          mapped.sdkMessageType,
+        );
+      }
+
+      const msg = message as { type: string; session_id?: string };
+      if (msg.session_id) sessionId = msg.session_id;
     }
-
-    const msg = message as { type: string; session_id?: string };
-    if (msg.session_id) sessionId = msg.session_id;
+  } catch (err) {
+    throw await enrichClaudeError(err, input.workspacePath, debugFile);
   }
 
   return sessionId;
+}
+
+async function enrichClaudeError(
+  err: unknown,
+  workspacePath: string,
+  debugFile?: string,
+): Promise<Error> {
+  const base = err instanceof Error ? err.message : String(err);
+  const lines = [
+    base,
+    `工作区: ${workspacePath}`,
+    '当前为 agent-sdk（Claude Code）。若使用 Gemini/GPT，请设置 DEV_AGENT_RUNTIME=client-sdk 并重建镜像。',
+    '常见原因: API Key 无效、缺少 bash、root 用户运行容器。',
+  ];
+  if (debugFile) {
+    try {
+      const tail = (await readFile(debugFile, 'utf-8')).trim().slice(-2000);
+      if (tail) lines.push(`调试日志尾部:\n${tail}`);
+    } catch {
+      lines.push(`调试日志: ${debugFile}（文件不存在或为空）`);
+    }
+  }
+  return new Error(lines.join('\n'));
 }

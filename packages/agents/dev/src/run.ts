@@ -45,6 +45,10 @@ export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
   await mkdir(input.workspacePath, { recursive: true });
   await assertDevPrerequisites(input.workspacePath, input.model);
 
+  console.info(
+    `[dev-agent] loop=${input.loopId} runtime=${input.model.runtime} model=${input.model.model} baseUrl=${input.model.baseUrl ?? '(none)'}`,
+  );
+
   if (input.model.runtime === 'client-sdk') {
     await runDevAgentOpenAI({
       api,
