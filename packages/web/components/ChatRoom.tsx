@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadUserIdentity, type UserIdentity } from '../lib/user-identity';
+import { ChatInput } from './ChatInput';
 import { UserIdentityPrompt } from './UserIdentityPrompt';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
@@ -289,19 +290,11 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           gap: 8,
         }}
       >
-        <input
+        <ChatInput
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder="输入消息… 可用 @pm-agent @dev-agent @ops-agent"
-          style={{
-            flex: 1,
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: '1px solid #30363d',
-            background: '#0d1117',
-            color: '#e6edf3',
-          }}
+          onChange={setInput}
+          onSend={send}
+          disabled={!connected}
         />
         <button
           onClick={send}
