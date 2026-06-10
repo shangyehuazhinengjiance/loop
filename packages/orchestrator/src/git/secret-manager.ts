@@ -27,22 +27,34 @@ export class SecretManager {
       return { type: 'ssh', sshKeyPath: path };
     }
 
+    const wantsSsh =
+      credentialRef === 'GIT_SSH_KEY_PATH' || credentialRef.toLowerCase().includes('ssh');
+    const wantsToken =
+      credentialRef === 'GIT_ACCESS_TOKEN' || credentialRef.toLowerCase().includes('token');
+
+    if (wantsSsh || !wantsToken) {
+      const sshPath =
+        process.env.GIT_SSH_KEY_PATH ??
+        (credentialRef && !wantsToken ? join(process.cwd(), credentialRef) : undefined);
+      if (sshPath) {
+        try {
+          await readFile(sshPath, 'utf-8');
+          return { type: 'ssh', sshKeyPath: sshPath };
+        } catch {
+          if (wantsSsh) {
+            throw new Error(
+              `SSH key not found at ${sshPath}. Mount Deploy Key and set GIT_SSH_KEY_PATH.`,
+            );
+          }
+        }
+      } else if (wantsSsh) {
+        throw new Error('GIT_SSH_KEY_PATH is not set');
+      }
+    }
+
     const token = process.env.GIT_ACCESS_TOKEN ?? process.env[credentialRef];
     if (token && !token.includes('/') && token.length > 8) {
       return { type: 'token', token };
-    }
-
-    const sshPath =
-      process.env.GIT_SSH_KEY_PATH ??
-      (credentialRef ? join(process.cwd(), credentialRef) : undefined);
-
-    if (sshPath) {
-      try {
-        await readFile(sshPath, 'utf-8');
-        return { type: 'ssh', sshKeyPath: sshPath };
-      } catch {
-        // fall through
-      }
     }
 
     throw new Error(`Cannot resolve credential: ${credentialRef}`);

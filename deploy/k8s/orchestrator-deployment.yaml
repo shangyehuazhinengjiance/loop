@@ -32,6 +32,9 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /data/workspaces
+            - name: git-deploy-key
+              mountPath: /secrets/git
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 3000
@@ -53,3 +56,7 @@ spec:
         - name: workspaces
           persistentVolumeClaim:
             claimName: loop-workspaces
+        - name: git-deploy-key
+          secret:
+            secretName: loop-git-deploy-key
+            defaultMode: 0400

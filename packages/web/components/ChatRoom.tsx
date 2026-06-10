@@ -11,6 +11,12 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
 const ORCHESTRATOR =
   process.env.NEXT_PUBLIC_ORCHESTRATOR_URL ?? 'http://localhost:3000';
 
+const ACTION_REQUIRED_PHASE: Record<string, string> = {
+  approve_prd: 'requirement',
+  approve_dev: 'development',
+  approve_deploy: 'deployment',
+};
+
 interface Action {
   id: string;
   label: string;
@@ -100,13 +106,27 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     setInput('');
   }
 
+  function isActionAvailable(action: string): boolean {
+    const required = ACTION_REQUIRED_PHASE[action];
+    return required !== undefined && phase === required;
+  }
+
   async function approve(action: string) {
     if (!user) return;
-    await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/approve`, {
+    if (!isActionAvailable(action)) {
+      alert(`当前阶段为 ${phase}，无法执行 ${action}`);
+      return;
+    }
+    const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, approvedBy: user.userId }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.message ?? `审批失败 (${res.status})`);
+      return;
+    }
     await refreshLoop();
   }
 
@@ -260,23 +280,25 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             >
               <MarkdownContent content={m.content.body} />
             </div>
-            {m.content.actions?.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => approve(a.action)}
-                style={{
-                  marginTop: 8,
-                  marginRight: 8,
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  border: '1px solid #238636',
-                  background: 'transparent',
-                  color: '#3fb950',
-                }}
-              >
-                {a.label}
-              </button>
-            ))}
+            {m.content.actions
+              ?.filter((a) => isActionAvailable(a.action))
+              .map((a) => (
+                <button
+                  key={a.id}
+                  onClick={() => approve(a.action)}
+                  style={{
+                    marginTop: 8,
+                    marginRight: 8,
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #238636',
+                    background: 'transparent',
+                    color: '#3fb950',
+                  }}
+                >
+                  {a.label}
+                </button>
+              ))}
           </div>
         ))}
         <div ref={bottomRef} />
