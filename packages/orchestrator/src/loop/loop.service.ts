@@ -31,13 +31,76 @@ export class LoopService {
     const workspacePath = join(workspaceRoot, `loop-${loop.id}`);
     await this.loopRepo.updateWorkspacePath(loop.id, workspacePath);
 
+    const gitConfig = project.git_config as { remoteUrl?: string } | undefined;
     try {
       await this.gitService.initLoopWorkspace(loop.id);
+      if (gitConfig?.remoteUrl) {
+        await this.chatService.publishAgentMessage({
+          loopId: loop.id,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: `已从 ${gitConfig.remoteUrl} 初始化开发工作区，分支 loop/${loop.id}。`,
+          },
+        });
+      }
     } catch (err) {
-      console.warn(`[loop] git init skipped for ${loop.id}:`, err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (gitConfig?.remoteUrl) {
+        console.error(`[loop] git init failed for ${loop.id}:`, err);
+        await this.chatService.publishAgentMessage({
+          loopId: loop.id,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: `Git 工作区初始化失败: ${msg}。请检查 Deploy Key / Token 与仓库地址，修复后调用 POST /api/loops/${loop.id}/reinit-workspace 重试。`,
+          },
+        });
+      } else {
+        console.warn(
+          `[loop] 未配置 Git 远程仓库，工作区为空（仅本地 git）。` +
+            ` 请配置 GIT_DEFAULT_REMOTE_URL 或 project.gitConfig.remoteUrl。`,
+        );
+      }
     }
 
     return (await this.loopRepo.findById(loop.id))!;
+  }
+
+  async reinitWorkspace(loopId: string) {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) throw new Error(`Loop not found: ${loopId}`);
+
+    const project = await this.projectRepo.findById(loop.project_id);
+    const gitConfig = project?.git_config as { remoteUrl?: string } | undefined;
+    if (!gitConfig?.remoteUrl) {
+      throw new Error(
+        'Project 未配置 gitConfig.remoteUrl。请先 PATCH /api/projects/:id 或设置 GIT_DEFAULT_REMOTE_URL。',
+      );
+    }
+
+    const result = await this.gitService.reinitLoopWorkspace(loopId);
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: loop.phase,
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: `工作区已重新从 ${gitConfig.remoteUrl} 拉取，当前分支 ${result.gitBranch}。`,
+      },
+    });
+    return result;
+  }
+
+  async updateProjectGitConfig(
+    projectId: string,
+    gitConfig: Record<string, unknown>,
+  ) {
+    const project = await this.projectRepo.findById(projectId);
+    if (!project) throw new Error(`Project not found: ${projectId}`);
+    return this.projectRepo.updateGitConfig(projectId, gitConfig);
   }
 
   async getLoop(loopId: string): Promise<LoopRow | null> {
@@ -112,6 +175,29 @@ export class LoopService {
 
   async getProject(projectId: string) {
     return this.projectRepo.findById(projectId);
+  }
+
+  async listProjects() {
+    return this.projectRepo.listAll();
+  }
+
+  async listProjectsWithLoops() {
+    const projects = await this.projectRepo.listAll();
+    return Promise.all(
+      projects.map(async (project) => ({
+        id: project.id,
+        name: project.name,
+        gitConfig: project.git_config,
+        createdAt: project.created_at,
+        loops: (await this.loopRepo.listByProject(project.id)).map((loop) => ({
+          id: loop.id,
+          title: loop.title,
+          phase: loop.phase,
+          status: loop.status,
+          updatedAt: loop.updated_at,
+        })),
+      })),
+    );
   }
 
   private extractMentions(body: string): string[] {

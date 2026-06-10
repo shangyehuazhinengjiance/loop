@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Phase } from '@loop/shared';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
@@ -75,6 +75,23 @@ export class GitService {
     });
 
     return { workspacePath, gitBranch: loopBranch, gitRef };
+  }
+
+  /** 清空工作区并重新 clone（用于补配 Git 或修复失败的初始化） */
+  async reinitLoopWorkspace(loopId: string): Promise<InitWorkspaceResult> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) throw new Error(`Loop not found: ${loopId}`);
+
+    const workspacePath =
+      loop.workspace_path ??
+      join(process.env.WORKSPACE_ROOT ?? './workspaces', `loop-${loopId}`);
+
+    if (await this.pathExists(workspacePath)) {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+    await mkdir(workspacePath, { recursive: true });
+
+    return this.initLoopWorkspace(loopId);
   }
 
   async createSnapshotTag(

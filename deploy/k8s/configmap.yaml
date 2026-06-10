@@ -10,6 +10,11 @@ data:
   ORCHESTRATOR_URL: "http://loop-orchestrator:3000"
   WORKSPACE_ROOT: "/data/workspaces"
 
+  # 默认 Git 仓库（Web 创建 Project 时自动用于 clone，Dev Agent 工作区）
+  GIT_DEFAULT_REMOTE_URL: "git@github.com:shangyehuazhinengjiance/loop.git"
+  GIT_DEFAULT_BRANCH: "master"
+  GIT_DEFAULT_CREDENTIAL_REF: "GIT_SSH_KEY_PATH"
+
   # PM 模型（非密钥部分）
   PM_MODEL_BASE_URL: "https://api.anthropic.com"
   PM_MODEL_NAME: "claude-sonnet-4-20250514"

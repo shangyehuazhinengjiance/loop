@@ -1,5 +1,6 @@
 import type { ApprovalActionType, LoopContext, LoopMessage, Phase } from '@loop/shared';
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -15,6 +16,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { ChatService } from '../chat/chat.service.js';
 import { SnapshotRepository } from '../db/repositories/snapshot.repository.js';
 import { ReplayService } from '../replay/replay.service.js';
+import { mergeGitConfig, defaultGitConfigFromEnv } from '../git/default-git-config.js';
 import { LoopService } from './loop.service.js';
 import { PhaseService } from '../phase/phase.service.js';
 
@@ -31,13 +33,21 @@ export class LoopController {
     private readonly replayService: ReplayService,
   ) {}
 
+  @Get('projects')
+  async listProjects(@Query('withLoops') withLoops?: string) {
+    if (withLoops === '1' || withLoops === 'true') {
+      return this.loopService.listProjectsWithLoops();
+    }
+    return this.loopService.listProjects();
+  }
+
   @Post('projects')
   async createProject(
     @Body() body: { name: string; gitConfig?: Record<string, unknown>; modelConfig?: unknown },
   ) {
     return this.loopService.createProject({
       name: body.name,
-      gitConfig: body.gitConfig ?? {},
+      gitConfig: mergeGitConfig(body.gitConfig, defaultGitConfigFromEnv()),
       modelConfig: (body.modelConfig as never) ?? {},
     });
   }
@@ -47,6 +57,26 @@ export class LoopController {
     const project = await this.loopService.getProject(id);
     if (!project) throw new NotFoundException('Project not found');
     return project;
+  }
+
+  @Patch('projects/:id')
+  async updateProject(
+    @Param('id') id: string,
+    @Body() body: { gitConfig?: Record<string, unknown> },
+  ) {
+    if (!body.gitConfig) {
+      throw new BadRequestException('gitConfig required');
+    }
+    const project = await this.loopService.updateProjectGitConfig(id, body.gitConfig);
+    if (!project) throw new NotFoundException('Project not found');
+    return project;
+  }
+
+  @Get('projects/:id/loops')
+  async listLoops(@Param('id') projectId: string) {
+    const project = await this.loopService.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+    return this.loopService.listLoops(projectId);
   }
 
   @Post('projects/:id/loops')
@@ -67,6 +97,11 @@ export class LoopController {
   @Post('loops/:id/start')
   async startLoop(@Param('id') id: string) {
     return this.loopService.startLoop(id);
+  }
+
+  @Post('loops/:id/reinit-workspace')
+  async reinitWorkspace(@Param('id') id: string) {
+    return this.loopService.reinitWorkspace(id);
   }
 
   @Post('loops/:id/rollback')

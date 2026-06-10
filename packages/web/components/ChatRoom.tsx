@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { loadUserIdentity, type UserIdentity } from '../lib/user-identity';
+import { UserIdentityPrompt } from './UserIdentityPrompt';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
 const ORCHESTRATOR =
@@ -22,6 +24,10 @@ interface Message {
 }
 
 export function ChatRoom({ loopId }: { loopId: string }) {
+  const [user, setUser] = useState<UserIdentity | null>(null);
+  const [identityLoaded, setIdentityLoaded] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [phase, setPhase] = useState('created');
   const [input, setInput] = useState('');
@@ -29,6 +35,11 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [rollbackPhase, setRollbackPhase] = useState('requirement');
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setUser(loadUserIdentity());
+    setIdentityLoaded(true);
+  }, []);
 
   const refreshLoop = useCallback(async () => {
     const loop = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}`).then((r) =>
@@ -45,6 +56,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   }, []);
 
   useEffect(() => {
+    if (!user) return;
+
     refreshLoop();
 
     const ws = new WebSocket(`${WS_URL}/ws/loops/${loopId}`);
@@ -66,35 +79,37 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     };
 
     return () => ws.close();
-  }, [loopId, appendMessage, refreshLoop]);
+  }, [loopId, user, appendMessage, refreshLoop]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   function send() {
-    if (!input.trim() || !wsRef.current) return;
+    if (!input.trim() || !wsRef.current || !user) return;
     wsRef.current.send(
       JSON.stringify({
         type: 'message',
         body: input,
-        userId: 'human-1',
-        displayName: 'Human',
+        userId: user.userId,
+        displayName: user.displayName,
       }),
     );
     setInput('');
   }
 
   async function approve(action: string) {
+    if (!user) return;
     await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, approvedBy: 'human-1' }),
+      body: JSON.stringify({ action, approvedBy: user.userId }),
     });
     await refreshLoop();
   }
 
   async function rollback() {
+    if (!user) return;
     const reason = prompt('回退原因：');
     if (!reason) return;
     await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/rollback`, {
@@ -103,14 +118,42 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       body: JSON.stringify({
         targetPhase: rollbackPhase,
         reason,
-        userId: 'human-1',
+        userId: user.userId,
       }),
     });
     await refreshLoop();
   }
 
+  if (!identityLoaded) {
+    return (
+      <div style={{ padding: 48, textAlign: 'center', color: '#8b949e' }}>加载中…</div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <UserIdentityPrompt
+        onComplete={(identity) => {
+          setUser(identity);
+        }}
+      />
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {showRename && (
+        <UserIdentityPrompt
+          title="修改昵称"
+          initialName={user.displayName}
+          onCancel={() => setShowRename(false)}
+          onComplete={(identity) => {
+            setUser(identity);
+            setShowRename(false);
+          }}
+        />
+      )}
+
       <header
         style={{
           padding: '12px 20px',
@@ -130,6 +173,21 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           <span style={{ color: '#8b949e', fontSize: 13 }}>{loopId.slice(0, 8)}…</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <button
+            type="button"
+            onClick={() => setShowRename(true)}
+            title={`ID: ${user.userId}`}
+            style={{
+              padding: '2px 8px',
+              borderRadius: 12,
+              border: '1px solid #30363d',
+              background: '#21262d',
+              color: '#58a6ff',
+              cursor: 'pointer',
+            }}
+          >
+            {user.displayName}
+          </button>
           <span
             style={{
               padding: '2px 8px',
@@ -186,8 +244,16 @@ export function ChatRoom({ loopId }: { loopId: string }) {
               style={{
                 padding: '10px 14px',
                 borderRadius: 8,
-                background: m.sender.type === 'human' ? '#161b22' : '#1c2128',
-                border: '1px solid #30363d',
+                background:
+                  m.sender.type === 'human' && m.sender.id === user.userId
+                    ? '#1a2332'
+                    : m.sender.type === 'human'
+                      ? '#161b22'
+                      : '#1c2128',
+                border:
+                  m.sender.id === user.userId
+                    ? '1px solid #388bfd66'
+                    : '1px solid #30363d',
                 whiteSpace: 'pre-wrap',
               }}
             >
