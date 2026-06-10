@@ -2,7 +2,7 @@
 # 构建并推送 4 个 Loop 基础镜像（在仓库根目录执行）
 set -eu
 
-REGISTRY="${REGISTRY:-harbor.qihoo.net/ai-native}"
+REGISTRY="${REGISTRY:-harbor.qihoo.net/syhzqfw-sjxm-ai-native}"
 TAG="${TAG:-latest}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 

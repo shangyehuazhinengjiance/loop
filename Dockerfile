@@ -4,7 +4,7 @@
 # 【推荐】使用预装依赖的基础镜像（见 deploy/DOCKER.md）：
 #
 #   docker build -f Dockerfile \
-#     --build-arg BASE_REGISTRY=harbor.qihoo.net/ai-native \
+#     --build-arg BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native \
 #     --build-arg BASE_TAG=latest \
 #     -t loop-orchestrator .
 #
@@ -14,7 +14,7 @@
 # 构建 context 必须是仓库根目录 .
 # =============================================================================
 
-ARG BASE_REGISTRY=harbor.qihoo.net/ai-native
+ARG BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native
 ARG BASE_TAG=latest
 
 FROM ${BASE_REGISTRY}/loop-base-monorepo-builder:${BASE_TAG} AS builder

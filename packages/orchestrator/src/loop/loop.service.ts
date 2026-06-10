@@ -39,7 +39,21 @@ export class LoopService {
 
     const gitConfig = project.git_config as { remoteUrl?: string } | undefined;
     try {
-      const initResult = await this.gitService.initLoopWorkspace(loop.id);
+      let initResult: Awaited<ReturnType<GitService['initLoopWorkspace']>>;
+      if (gitConfig?.remoteUrl) {
+        this.chatService.emitProcessing({
+          loopId: loop.id,
+          active: true,
+          label: '正在初始化 Git 工作区…',
+        });
+        try {
+          initResult = await this.gitService.initLoopWorkspace(loop.id);
+        } finally {
+          this.chatService.emitProcessing({ loopId: loop.id, active: false });
+        }
+      } else {
+        initResult = await this.gitService.initLoopWorkspace(loop.id);
+      }
       if (gitConfig?.remoteUrl) {
         const summary = await this.tryEnsureCodebaseSummary({
           projectId,
@@ -65,6 +79,7 @@ export class LoopService {
         });
       }
     } catch (err) {
+      this.chatService.emitProcessing({ loopId: loop.id, active: false });
       const msg = err instanceof Error ? err.message : String(err);
       if (gitConfig?.remoteUrl) {
         console.error(`[loop] git init failed for ${loop.id}:`, err);

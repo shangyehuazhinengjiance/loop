@@ -38,6 +38,13 @@ export class AgentRunnerService implements OnModuleInit {
     private readonly memberService: LoopMemberService,
   ) {}
 
+  getRunningAgent(loopId: string): AgentRole | null {
+    for (const agent of ['pm', 'dev', 'ops'] as const) {
+      if (this.running.has(`${loopId}:${agent}`)) return agent;
+    }
+    return null;
+  }
+
   onModuleInit() {
     this.coordinator.on('agent:activate', (event: AgentActivateEvent) => {
       void this.handleActivate(event);
@@ -53,6 +60,7 @@ export class AgentRunnerService implements OnModuleInit {
     const key = `${event.loopId}:${event.agent}`;
     if (this.running.has(key)) return;
     this.running.add(key);
+    this.emitAgentProcessing(event.loopId, event.agent, true);
 
     const abort = new AbortController();
     this.abortControllers.set(key, abort);
@@ -78,7 +86,17 @@ export class AgentRunnerService implements OnModuleInit {
     } finally {
       this.running.delete(key);
       this.abortControllers.delete(key);
+      this.emitAgentProcessing(event.loopId, event.agent, false);
     }
+  }
+
+  private emitAgentProcessing(loopId: string, agent: AgentRole, active: boolean): void {
+    this.chatService.emitProcessing({
+      loopId,
+      active,
+      agent: active ? agent : undefined,
+      label: active ? `${this.agentLabel(agent)} 正在处理…` : undefined,
+    });
   }
 
   private agentLabel(agent: AgentRole): string {

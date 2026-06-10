@@ -6,9 +6,12 @@ import {
 import { Injectable } from '@nestjs/common';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { ChatService } from '../chat/chat.service.js';
 import { ModelRouter } from '../model/model-router.js';
 import { generateCodebaseSummary } from './summary-llm.js';
 import { scanWorkspace } from './workspace-scanner.js';
+
+const SUMMARY_PROCESSING_LABEL = '正在生成代码库摘要…';
 
 interface SummaryMeta {
   gitRef: string;
@@ -27,7 +30,16 @@ export interface EnsureSummaryInput {
 
 @Injectable()
 export class CodebaseSummaryService {
-  constructor(private readonly modelRouter: ModelRouter) {}
+  private readonly generatingLoops = new Set<string>();
+
+  constructor(
+    private readonly modelRouter: ModelRouter,
+    private readonly chatService: ChatService,
+  ) {}
+
+  isGenerating(loopId: string): boolean {
+    return this.generatingLoops.has(loopId);
+  }
 
   isEnabled(): boolean {
     return process.env.CODEBASE_SUMMARY_ENABLED !== 'false';
@@ -117,26 +129,45 @@ export class CodebaseSummaryService {
     }
 
     const model = this.modelRouter.resolve(input.projectModelConfig, undefined, 'pm');
-    const summaryBody = await generateCodebaseSummary(snapshot, model);
+    this.setGenerating(input.loopId, true);
+    try {
+      const summaryBody = await generateCodebaseSummary(snapshot, model);
 
-    await mkdir(cacheDir, { recursive: true });
-    await writeFile(cachePath, summaryBody, 'utf-8');
-    if (input.gitRef) {
-      const metaOut: SummaryMeta = {
+      await mkdir(cacheDir, { recursive: true });
+      await writeFile(cachePath, summaryBody, 'utf-8');
+      if (input.gitRef) {
+        const metaOut: SummaryMeta = {
+          gitRef: input.gitRef,
+          remoteUrl: input.remoteUrl,
+          generatedAt: new Date().toISOString(),
+        };
+        await writeFile(join(cacheDir, 'meta.json'), JSON.stringify(metaOut, null, 2), 'utf-8');
+      }
+
+      await this.writeSummary(targetPath, summaryBody, {
+        loopId: input.loopId,
         gitRef: input.gitRef,
         remoteUrl: input.remoteUrl,
-        generatedAt: new Date().toISOString(),
-      };
-      await writeFile(join(cacheDir, 'meta.json'), JSON.stringify(metaOut, null, 2), 'utf-8');
+        fromCache: false,
+      });
+
+      return { path: CODEBASE_SUMMARY_REL_PATH, cached: false };
+    } finally {
+      this.setGenerating(input.loopId, false);
     }
+  }
 
-    await this.writeSummary(targetPath, summaryBody, {
-      loopId: input.loopId,
-      gitRef: input.gitRef,
-      remoteUrl: input.remoteUrl,
-      fromCache: false,
-    });
-
-    return { path: CODEBASE_SUMMARY_REL_PATH, cached: false };
+  private setGenerating(loopId: string, active: boolean): void {
+    if (active) {
+      this.generatingLoops.add(loopId);
+      this.chatService.emitProcessing({
+        loopId,
+        active: true,
+        label: SUMMARY_PROCESSING_LABEL,
+      });
+    } else {
+      this.generatingLoops.delete(loopId);
+      this.chatService.emitProcessing({ loopId, active: false });
+    }
   }
 }

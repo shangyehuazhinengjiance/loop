@@ -1,7 +1,7 @@
 import { Controller, Param, Sse } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import type { LoopMessage } from '@loop/shared';
-import { ChatService } from './chat.service.js';
+import { ChatService, type LoopProcessingEvent } from './chat.service.js';
 
 @Controller('api/loops/:loopId')
 export class ChatSseController {
@@ -18,8 +18,20 @@ export class ChatSseController {
         }
       };
 
+      const processingHandler = (event: LoopProcessingEvent) => {
+        if (event.loopId === loopId) {
+          subscriber.next({
+            data: JSON.stringify({ type: 'processing', ...event }),
+          });
+        }
+      };
+
       this.chatService.onMessage(handler);
-      return () => this.chatService.off('message', handler);
+      this.chatService.onProcessing(processingHandler);
+      return () => {
+        this.chatService.off('message', handler);
+        this.chatService.off('processing', processingHandler);
+      };
     });
   }
 }

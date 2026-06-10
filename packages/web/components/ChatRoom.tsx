@@ -7,6 +7,7 @@ import { ChatInput, type HumanMentionOption } from './ChatInput';
 import { LoopJoinPrompt } from './LoopJoinPrompt';
 import { LoopMembersPanel } from './LoopMembersPanel';
 import { MarkdownContent } from './MarkdownContent';
+import { ProcessingBanner } from './ProcessingBanner';
 import { UserIdentityPrompt } from './UserIdentityPrompt';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
@@ -17,6 +18,12 @@ const ACTION_REQUIRED_PHASE: Record<string, string> = {
   approve_prd: 'requirement',
   approve_dev: 'development',
   approve_deploy: 'deployment',
+};
+
+const APPROVE_PENDING_LABEL: Record<string, string> = {
+  approve_prd: '正在确认 PRD…',
+  approve_dev: '正在提交开发验收…',
+  approve_deploy: '正在确认流水线完成…',
 };
 
 interface Action {
@@ -64,8 +71,14 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [connected, setConnected] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [rollbackPhase, setRollbackPhase] = useState('requirement');
+  const [clientPending, setClientPending] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [agentProcessing, setAgentProcessing] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const busy = Boolean(clientPending || sending || agentProcessing);
+  const statusLabel =
+    clientPending ?? (sending ? '正在发送消息…' : null) ?? agentProcessing;
 
   useEffect(() => {
     setUser(loadUserIdentity());
@@ -79,6 +92,9 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     setPhase(loop.phase);
     setLoopStatus(loop.status ?? 'active');
     setBlocker(loop.blocker ?? null);
+    setAgentProcessing(
+      loop.processing?.active && loop.processing.label ? loop.processing.label : null,
+    );
   }, [loopId]);
 
   const loadMembers = useCallback(async () => {
@@ -127,6 +143,17 @@ export function ChatRoom({ loopId }: { loopId: string }) {
         appendMessage(data.message);
         void refreshLoop();
       }
+      if (data.type === 'processing') {
+        setAgentProcessing(data.active ? (data.label ?? '处理中…') : null);
+      }
+      if (data.type === 'ack') {
+        setSending(false);
+      }
+      if (data.type === 'error') {
+        setSending(false);
+        setAgentProcessing(null);
+        alert(data.message ?? '操作失败');
+      }
     };
 
     return () => ws.close();
@@ -137,7 +164,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   }, [messages]);
 
   function send() {
-    if (!input.trim() || !wsRef.current || !user) return;
+    if (!input.trim() || !wsRef.current || !user || busy) return;
+    setSending(true);
     wsRef.current.send(
       JSON.stringify({
         type: 'message',
@@ -204,54 +232,69 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   }
 
   async function approve(action: string) {
-    if (!user) return;
+    if (!user || busy) return;
     if (!isActionAvailable(action)) {
       alert(`当前阶段为 ${phase}，无法执行 ${action}`);
       return;
     }
-    const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, approvedBy: user.userId }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      alert(err.message ?? `审批失败 (${res.status})`);
-      return;
+    setClientPending(APPROVE_PENDING_LABEL[action] ?? '正在处理…');
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, approvedBy: user.userId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message ?? `审批失败 (${res.status})`);
+        return;
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
     }
-    await refreshLoop();
   }
 
   async function resolveBlocker() {
-    if (!user) return;
+    if (!user || busy) return;
     const note = prompt('处理说明（可选）：') ?? undefined;
-    const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/blocker/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user.userId, note: note || undefined }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      alert(err.message ?? '解除阻塞失败');
-      return;
+    setClientPending('正在解除阻塞…');
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/blocker/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.userId, note: note || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message ?? '解除阻塞失败');
+        return;
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
     }
-    await refreshLoop();
   }
 
   async function rollback() {
-    if (!user) return;
+    if (!user || busy) return;
     const reason = prompt('回退原因：');
     if (!reason) return;
-    await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/rollback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetPhase: rollbackPhase,
-        reason,
-        userId: user.userId,
-      }),
-    });
-    await refreshLoop();
+    setClientPending('正在回退阶段…');
+    try {
+      await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/rollback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetPhase: rollbackPhase,
+          reason,
+          userId: user.userId,
+        }),
+      });
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
+    }
   }
 
   if (!identityLoaded) {
@@ -398,13 +441,16 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           </select>
           <button
             onClick={rollback}
+            disabled={busy}
             style={{
               padding: '4px 10px',
               borderRadius: 6,
               border: '1px solid #f85149',
               background: 'transparent',
-              color: '#f85149',
+              color: busy ? '#8b949e' : '#f85149',
               fontSize: 12,
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.6 : 1,
             }}
           >
             回退
@@ -414,6 +460,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           </span>
         </div>
       </header>
+
+      {statusLabel && <ProcessingBanner label={statusLabel} />}
 
       {blocker && loopStatus === 'blocked' && (
         <div
@@ -433,6 +481,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           <button
             type="button"
             onClick={resolveBlocker}
+            disabled={busy}
             style={{
               marginTop: 8,
               padding: '6px 12px',
@@ -441,10 +490,11 @@ export function ChatRoom({ loopId }: { loopId: string }) {
               background: '#238636',
               color: '#fff',
               fontSize: 13,
-              cursor: 'pointer',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.7 : 1,
             }}
           >
-            已解决，解除阻塞
+            {clientPending === '正在解除阻塞…' ? '处理中…' : '已解决，解除阻塞'}
           </button>
         </div>
       )}
@@ -483,20 +533,22 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                   <div key={a.id} style={{ marginTop: 8 }}>
                     <button
                       type="button"
-                      onClick={() => clickable && approve(a.action)}
-                      disabled={!clickable}
+                      onClick={() => clickable && !busy && approve(a.action)}
+                      disabled={!clickable || busy}
                       title={hint}
                       style={{
                         marginRight: 8,
                         padding: '6px 12px',
                         borderRadius: 6,
-                        border: `1px solid ${clickable ? '#238636' : '#484f58'}`,
+                        border: `1px solid ${clickable && !busy ? '#238636' : '#484f58'}`,
                         background: 'transparent',
-                        color: clickable ? '#3fb950' : '#8b949e',
-                        cursor: clickable ? 'pointer' : 'not-allowed',
+                        color: clickable && !busy ? '#3fb950' : '#8b949e',
+                        cursor: clickable && !busy ? 'pointer' : 'not-allowed',
                       }}
                     >
-                      {a.label}
+                      {clientPending && APPROVE_PENDING_LABEL[a.action] === clientPending
+                        ? '处理中…'
+                        : a.label}
                     </button>
                     {hint && (
                       <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>
@@ -523,20 +575,23 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           value={input}
           onChange={setInput}
           onSend={send}
-          disabled={!connected}
+          disabled={!connected || busy}
           humanMentions={humanMentions}
         />
         <button
           onClick={send}
+          disabled={!connected || busy || !input.trim()}
           style={{
             padding: '10px 20px',
             borderRadius: 8,
             border: 'none',
             background: '#238636',
             color: '#fff',
+            opacity: !connected || busy || !input.trim() ? 0.6 : 1,
+            cursor: !connected || busy || !input.trim() ? 'not-allowed' : 'pointer',
           }}
         >
-          发送
+          {sending ? '发送中…' : '发送'}
         </button>
       </div>
     </div>

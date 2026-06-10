@@ -25,6 +25,8 @@ import { ReplayService } from '../replay/replay.service.js';
 import { mergeGitConfig, defaultGitConfigFromEnv } from '../git/default-git-config.js';
 import { LoopService } from './loop.service.js';
 import { PhaseService } from '../phase/phase.service.js';
+import { AgentRunnerService } from '../agent/agent-runner.service.js';
+import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
 
 @Controller('api')
 export class LoopController {
@@ -40,6 +42,8 @@ export class LoopController {
     private readonly workspaceJobs: WorkspaceJobService,
     private readonly memberService: LoopMemberService,
     private readonly blockerService: BlockerService,
+    private readonly agentRunner: AgentRunnerService,
+    private readonly codebaseSummary: CodebaseSummaryService,
   ) {}
 
   @Get('projects')
@@ -100,7 +104,38 @@ export class LoopController {
   async getLoop(@Param('id') id: string) {
     const loop = await this.loopService.getLoop(id);
     if (!loop) throw new NotFoundException('Loop not found');
-    return loop;
+    return {
+      ...loop,
+      processing: this.resolveLoopProcessing(id),
+    };
+  }
+
+  private resolveLoopProcessing(loopId: string): {
+    active: boolean;
+    agent?: string;
+    label?: string;
+  } {
+    const runningAgent = this.agentRunner.getRunningAgent(loopId);
+    if (runningAgent) {
+      const label =
+        runningAgent === 'pm'
+          ? 'PM Agent 正在处理…'
+          : runningAgent === 'dev'
+            ? 'Dev Agent 正在处理…'
+            : 'Ops Agent 正在处理…';
+      return { active: true, agent: runningAgent, label };
+    }
+
+    const workspaceLabel = this.workspaceJobs.getProcessingLabel(loopId);
+    if (workspaceLabel) {
+      return { active: true, label: workspaceLabel };
+    }
+
+    if (this.codebaseSummary.isGenerating(loopId)) {
+      return { active: true, label: '正在生成代码库摘要…' };
+    }
+
+    return { active: false };
   }
 
   @Post('loops/:id/start')

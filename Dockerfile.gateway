@@ -2,12 +2,12 @@
 # AI Native Loop — Gateway 镜像
 # =============================================================================
 #   docker build -f Dockerfile.gateway \
-#     --build-arg BASE_REGISTRY=harbor.qihoo.net/ai-native \
+#     --build-arg BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native \
 #     --build-arg BASE_TAG=latest \
 #     -t loop-gateway .
 # =============================================================================
 
-ARG BASE_REGISTRY=harbor.qihoo.net/ai-native
+ARG BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native
 ARG BASE_TAG=latest
 
 FROM ${BASE_REGISTRY}/loop-base-monorepo-builder:${BASE_TAG} AS builder
