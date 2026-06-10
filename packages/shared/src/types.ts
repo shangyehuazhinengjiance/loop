@@ -78,6 +78,9 @@ export interface DeploymentInfo {
   stagingUrl?: string;
   productionUrl?: string;
   status: 'pending' | 'staging' | 'production' | 'failed';
+  /** 部署推送目标分支（默认 test） */
+  targetBranch?: string;
+  commitSha?: string;
 }
 
 export interface LoopContext {

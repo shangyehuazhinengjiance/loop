@@ -170,8 +170,17 @@ export function ChatRoom({ loopId }: { loopId: string }) {
         );
       return lastDevResult?.id === message.id;
     }
-    if (action === 'approve_prd' || action === 'approve_deploy') {
+    if (action === 'approve_prd') {
       return message.content.type === 'artifact';
+    }
+    if (action === 'approve_deploy') {
+      if (message.content.type !== 'artifact') return false;
+      const lastDeploy = [...messages]
+        .reverse()
+        .find((m) =>
+          m.content.actions?.some((a) => a.action === 'approve_deploy'),
+        );
+      return lastDeploy?.id === message.id;
     }
     return true;
   }

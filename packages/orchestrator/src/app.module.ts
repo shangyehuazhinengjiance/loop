@@ -26,6 +26,7 @@ import { SandboxService } from './sandbox/sandbox.service.js';
 import { CodebaseSummaryService } from './codebase/codebase-summary.service.js';
 import { WorkspaceJobService } from './workspace/workspace-job.service.js';
 import { BlockerService } from './blocker/blocker.service.js';
+import { DeploymentService } from './deployment/deployment.service.js';
 import { LoopMemberService } from './member/loop-member.service.js';
 import { LoopMemberRepository } from './db/repositories/loop-member.repository.js';
 
@@ -58,6 +59,7 @@ import { LoopMemberRepository } from './db/repositories/loop-member.repository.j
     LoopMemberRepository,
     LoopMemberService,
     BlockerService,
+    DeploymentService,
   ],
 })
 export class AppModule {}

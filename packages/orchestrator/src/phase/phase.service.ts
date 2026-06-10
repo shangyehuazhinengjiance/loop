@@ -16,6 +16,7 @@ import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { GitService } from '../git/git.service.js';
 import { ArtifactService } from '../artifact/artifact.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { DeploymentService } from '../deployment/deployment.service.js';
 
 export interface PhaseChangeEvent {
   loopId: string;
@@ -38,6 +39,7 @@ export class PhaseService {
     private readonly gitService: GitService,
     private readonly artifactService: ArtifactService,
     private readonly auditService: AuditService,
+    private readonly deploymentService: DeploymentService,
   ) {}
 
   getStateMachine(): PhaseStateMachine {
@@ -84,6 +86,10 @@ export class PhaseService {
       detail: { approvedBy, note, fromPhase: event.fromPhase, toPhase: event.toPhase },
       phase: event.toPhase,
     });
+
+    if (action === 'approve_dev' && event.toPhase === 'deployment') {
+      await this.deploymentService.submitToTestBranch(loopId, approvedBy);
+    }
 
     return event;
   }
@@ -223,7 +229,7 @@ export class PhaseService {
     const labels: Partial<Record<ApprovalActionType, string>> = {
       approve_prd: 'PRD 确认',
       approve_dev: '开发验收',
-      approve_deploy: '发布确认',
+      approve_deploy: '流水线完成',
     };
 
     const label = labels[action];
