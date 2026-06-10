@@ -1,9 +1,11 @@
-import type { ResolvedModelConfig } from '@loop/shared';
+import type { LoopMember, ResolvedModelConfig } from '@loop/shared';
 import {
   DEV_TOOL_DEFINITIONS,
   executeDevTool,
   REQUEST_HUMAN_HELP_TOOL,
 } from '@loop/agent-dev';
+import { isMeaninglessOpsResult, summarizeOpenAIResponse } from './debug.js';
+import { notifyOpsFailure } from './notify-failure.js';
 import { buildOpsPrompt } from './prompts.js';
 import type { OrchestratorApi } from './orchestrator-api.js';
 
@@ -35,11 +37,13 @@ interface OpenAIToolCall {
 
 interface ChatCompletionResponse {
   choices?: {
+    finish_reason?: string;
     message?: {
       content?: string | null;
       tool_calls?: OpenAIToolCall[];
     };
   }[];
+  error?: { message?: string };
 }
 
 function chatCompletionsUrl(baseUrl: string): string {
@@ -69,9 +73,21 @@ export async function runOpsAgentOpenAI(input: {
   context: Parameters<typeof buildOpsPrompt>[0];
   workspacePath: string;
   memberRoster?: string;
+  members: LoopMember[];
+  triggeredByUserId?: string;
   model: ResolvedModelConfig;
   signal?: AbortSignal;
 }): Promise<void> {
+  const fail = (reason: string, debug?: string) =>
+    notifyOpsFailure(
+      input.api,
+      input.loopId,
+      input.phase,
+      reason,
+      input.members,
+      { preferUserId: input.triggeredByUserId, debug },
+    );
+
   const messages: ChatMessage[] = [
     {
       role: 'system',
@@ -91,7 +107,7 @@ export async function runOpsAgentOpenAI(input: {
   let humanBlocked = false;
 
   for (let turn = 0; turn < maxTurns(); turn++) {
-    if (input.signal?.aborted) break;
+    if (input.signal?.aborted) return;
 
     const res = await fetch(url, {
       method: 'POST',
@@ -109,15 +125,24 @@ export async function runOpsAgentOpenAI(input: {
       signal: input.signal,
     });
 
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Ops LLM failed (${res.status}): ${body.slice(0, 800)}`);
+    const rawText = await res.text();
+    let data: ChatCompletionResponse;
+    try {
+      data = JSON.parse(rawText) as ChatCompletionResponse;
+    } catch {
+      await fail(`LLM 返回非 JSON（HTTP ${res.status}）`, rawText.slice(0, 800));
+      return;
     }
 
-    const data = (await res.json()) as ChatCompletionResponse;
+    if (!res.ok) {
+      await fail(`LLM 请求失败（HTTP ${res.status}）`, summarizeOpenAIResponse(data));
+      return;
+    }
+
     const assistant = data.choices?.[0]?.message;
     if (!assistant) {
-      throw new Error('Ops LLM returned empty choice');
+      await fail('LLM 返回空 choice', summarizeOpenAIResponse(data));
+      return;
     }
 
     const toolCalls = assistant.tool_calls ?? [];
@@ -128,7 +153,7 @@ export async function runOpsAgentOpenAI(input: {
     });
 
     if (toolCalls.length === 0) {
-      finalText = assistant.content?.trim() ?? '部署准备完成';
+      finalText = assistant.content?.trim() ?? '';
       break;
     }
 
@@ -185,32 +210,45 @@ export async function runOpsAgentOpenAI(input: {
     if (humanBlocked) break;
 
     if (turn === maxTurns() - 1) {
-      finalText = assistant.content?.trim() || '已达到最大工具轮次。';
+      finalText = assistant.content?.trim() ?? '';
     }
   }
 
-  if (!humanBlocked) {
-    const stagingMatch = finalText.match(/https?:\/\/[^\s]+/);
-    const loop = await input.api.getLoop(input.loopId);
-    const deployment = {
-      ...loop.context.deployment,
-      stagingUrl: stagingMatch?.[0] ?? loop.context.deployment?.stagingUrl,
-      status: 'staging' as const,
-    };
-    await input.api.updateContext(input.loopId, {
-      ...loop.context,
-      deployment,
-    });
+  if (humanBlocked) {
+    await input.api.postAgentMessage(
+      input.loopId,
+      { type: 'text', body: finalText },
+      input.phase,
+    );
+    return;
   }
+
+  if (isMeaninglessOpsResult(finalText)) {
+    await fail(
+      '模型响应为空或无实质内容（未生成部署说明）',
+      `finalText=${JSON.stringify(finalText)}`,
+    );
+    return;
+  }
+
+  const stagingMatch = finalText.match(/https?:\/\/[^\s]+/);
+  const loop = await input.api.getLoop(input.loopId);
+  const deployment = {
+    ...loop.context.deployment,
+    stagingUrl: stagingMatch?.[0] ?? loop.context.deployment?.stagingUrl,
+    status: 'staging' as const,
+  };
+  await input.api.updateContext(input.loopId, {
+    ...loop.context,
+    deployment,
+  });
 
   await input.api.postAgentMessage(
     input.loopId,
     {
-      type: humanBlocked ? 'text' : 'artifact',
-      body: finalText || '部署准备完成',
-      actions: humanBlocked
-        ? undefined
-        : [{ id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' }],
+      type: 'artifact',
+      body: finalText,
+      actions: [{ id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' }],
     },
     input.phase,
   );

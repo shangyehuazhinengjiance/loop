@@ -1,7 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { REQUEST_HUMAN_HELP_ANTHROPIC_TOOL, type ResolvedModelConfig } from '@loop/shared';
+import {
+  REQUEST_HUMAN_HELP_ANTHROPIC_TOOL,
+  type LoopMember,
+  type ResolvedModelConfig,
+} from '@loop/shared';
+import { summarizeAnthropicResponse } from './debug.js';
 import { buildPMUserPrompt, PM_SYSTEM_PROMPT } from './prompts.js';
 import { handlePmHumanHelp } from './human-help.js';
+import { notifyPmFailure } from './notify-failure.js';
+import { runPmAgentOpenAI } from './openai-agent.js';
 import { OrchestratorApi, parsePrdAndTasks } from './orchestrator-api.js';
 
 export interface RunPmAgentInput {
@@ -9,8 +16,30 @@ export interface RunPmAgentInput {
   orchestratorUrl: string;
   model: ResolvedModelConfig;
   memberRoster?: string;
+  members?: LoopMember[];
+  triggeredByUserId?: string;
   requirement?: string;
   signal?: AbortSignal;
+}
+
+async function finishPmSuccess(
+  api: OrchestratorApi,
+  loopId: string,
+  phase: string,
+  text: string,
+): Promise<void> {
+  const loop = await api.getLoop(loopId);
+  const { prd, tasks } = parsePrdAndTasks(text);
+  await api.updateContext(loopId, { ...loop.context, prd, tasks });
+  await api.postAgentMessage(
+    loopId,
+    {
+      type: 'artifact',
+      body: text,
+      actions: [{ id: 'approve-prd', label: '确认需求', action: 'approve_prd' }],
+    },
+    phase,
+  );
 }
 
 export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
@@ -18,8 +47,9 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
 
   const api = new OrchestratorApi(input.orchestratorUrl);
   const loop = await api.getLoop(input.loopId);
-  const messages = await api.getMessages(input.loopId);
+  const members = input.members ?? [];
 
+  const messages = await api.getMessages(input.loopId);
   const humanMessages = messages
     .filter((m) => m.sender.type === 'human')
     .map((m) => `${m.sender.displayName}: ${m.content.body}`)
@@ -30,11 +60,6 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     humanMessages.split('\n').pop() ??
     loop.title;
 
-  const client = new Anthropic({
-    apiKey: input.model.apiKey,
-    baseURL: input.model.baseUrl,
-  });
-
   const userContent = buildPMUserPrompt({
     requirement,
     existingPrd: loop.context.prd?.content,
@@ -42,15 +67,89 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     memberRoster: input.memberRoster,
   });
 
-  let response = await client.messages.create({
-    model: input.model.model,
-    max_tokens: input.model.extra?.max_tokens
-      ? parseInt(input.model.extra.max_tokens, 10)
-      : 8192,
-    system: PM_SYSTEM_PROMPT,
-    tools: [REQUEST_HUMAN_HELP_ANTHROPIC_TOOL],
-    messages: [{ role: 'user', content: userContent }],
+  if (input.model.runtime === 'client-sdk') {
+    if (!input.model.apiKey?.trim()) {
+      await notifyPmFailure(
+        api,
+        input.loopId,
+        loop.phase,
+        'PM_MODEL_API_KEY 未配置',
+        members,
+        { preferUserId: input.triggeredByUserId },
+      );
+      return;
+    }
+    if (!input.model.baseUrl?.trim()) {
+      await notifyPmFailure(
+        api,
+        input.loopId,
+        loop.phase,
+        'PM_MODEL_BASE_URL 未配置（client-sdk 必填）',
+        members,
+        { preferUserId: input.triggeredByUserId },
+      );
+      return;
+    }
+    console.info(
+      `[pm-agent] loop=${input.loopId} runtime=client-sdk model=${input.model.model} baseUrl=${input.model.baseUrl}`,
+    );
+    await runPmAgentOpenAI({
+      api,
+      loopId: input.loopId,
+      phase: loop.phase,
+      userContent,
+      memberRoster: input.memberRoster,
+      members,
+      triggeredByUserId: input.triggeredByUserId,
+      model: input.model,
+      signal: input.signal,
+    });
+    return;
+  }
+
+  if (!input.model.model.toLowerCase().includes('claude')) {
+    await notifyPmFailure(
+      api,
+      input.loopId,
+      loop.phase,
+      `agent-sdk 仅支持 Claude，当前模型为 "${input.model.model}"`,
+      members,
+      {
+        preferUserId: input.triggeredByUserId,
+        hints: ['请设置 PM_AGENT_RUNTIME=client-sdk 以使用 OpenAI 兼容网关（如 Gemini）'],
+      },
+    );
+    return;
+  }
+
+  const client = new Anthropic({
+    apiKey: input.model.apiKey,
+    baseURL: input.model.baseUrl,
   });
+
+  let response: Anthropic.Message;
+  try {
+    response = await client.messages.create({
+      model: input.model.model,
+      max_tokens: input.model.extra?.max_tokens
+        ? parseInt(input.model.extra.max_tokens, 10)
+        : 8192,
+      system: PM_SYSTEM_PROMPT,
+      tools: [REQUEST_HUMAN_HELP_ANTHROPIC_TOOL],
+      messages: [{ role: 'user', content: userContent }],
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await notifyPmFailure(
+      api,
+      input.loopId,
+      loop.phase,
+      `LLM 调用异常：${detail}`,
+      members,
+      { preferUserId: input.triggeredByUserId },
+    );
+    return;
+  }
 
   if (response.stop_reason === 'tool_use') {
     for (const block of response.content) {
@@ -64,13 +163,16 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
         return;
       }
     }
-    await api.postAgentMessage(
+    await notifyPmFailure(
+      api,
       input.loopId,
-      {
-        type: 'text',
-        body: 'PM Agent 调用了未支持的工具，未生成 PRD。请重试 @pm-agent。',
-      },
       loop.phase,
+      '调用了未支持的工具，未生成 PRD',
+      members,
+      {
+        preferUserId: input.triggeredByUserId,
+        debug: summarizeAnthropicResponse(response),
+      },
     );
     return;
   }
@@ -82,38 +184,19 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     .trim();
 
   if (!text) {
-    await api.postAgentMessage(
+    await notifyPmFailure(
+      api,
       input.loopId,
-      {
-        type: 'text',
-        body: 'PM Agent 未返回有效文本（模型响应为空）。请重试 @pm-agent，或检查 PM_MODEL_BASE_URL / PM_MODEL_NAME 配置。',
-      },
       loop.phase,
+      '模型响应为空（Anthropic SDK 无 text 块）',
+      members,
+      {
+        preferUserId: input.triggeredByUserId,
+        debug: summarizeAnthropicResponse(response),
+      },
     );
     return;
   }
 
-  const { prd, tasks } = parsePrdAndTasks(text);
-
-  await api.updateContext(input.loopId, {
-    ...loop.context,
-    prd,
-    tasks,
-  });
-
-  await api.postAgentMessage(
-    input.loopId,
-    {
-      type: 'artifact',
-      body: text,
-      actions: [
-        {
-          id: 'approve-prd',
-          label: '确认需求',
-          action: 'approve_prd',
-        },
-      ],
-    },
-    loop.phase,
-  );
+  await finishPmSuccess(api, input.loopId, loop.phase, text);
 }
