@@ -1,19 +1,20 @@
 services:
-  postgres:
-    image: postgres:16-alpine
+  mysql:
+    image: mysql:8.4
     environment:
-      POSTGRES_USER: loop
-      POSTGRES_PASSWORD: loop
-      POSTGRES_DB: loop
+      MYSQL_USER: loop
+      MYSQL_PASSWORD: loop
+      MYSQL_DATABASE: loop
+      MYSQL_ROOT_PASSWORD: loop-root
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - loop_pg_data:/var/lib/postgresql/data
+      - loop_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U loop -d loop"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "loop", "-ploop"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   redis:
     image: redis:7-alpine
@@ -34,4 +35,4 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-loop-litellm}
 
 volumes:
-  loop_pg_data:
+  loop_mysql_data:

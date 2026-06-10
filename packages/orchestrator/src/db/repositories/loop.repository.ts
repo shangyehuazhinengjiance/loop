@@ -1,5 +1,6 @@
 import type { LoopContext, LoopStatus, Phase } from '@loop/shared';
-import type pg from 'pg';
+import { dbQuery, dbQueryOne, insertReturning, parseJsonField, updateReturning } from '../query.js';
+import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
 
 export interface LoopRow {
@@ -16,29 +17,45 @@ export interface LoopRow {
   updated_at: Date;
 }
 
+function mapRow(row: LoopRow): LoopRow {
+  return {
+    ...row,
+    context: parseJsonField(row.context, {} as LoopContext),
+    model_overrides: row.model_overrides
+      ? parseJsonField(row.model_overrides, {})
+      : null,
+  };
+}
+
 export class LoopRepository {
-  constructor(private readonly pool: pg.Pool = getPool()) {}
+  constructor(private readonly pool: DbPool = getPool()) {}
 
   async create(input: {
     projectId: string;
     title: string;
     workspacePath?: string;
   }): Promise<LoopRow> {
-    const result = await this.pool.query<LoopRow>(
-      `INSERT INTO loops (project_id, title, workspace_path)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [input.projectId, input.title, input.workspacePath ?? null],
-    );
-    return result.rows[0]!;
+    const row = await insertReturning<LoopRow>(this.pool, 'loops', [
+      'project_id',
+      'title',
+      'workspace_path',
+      'context',
+    ], [
+      input.projectId,
+      input.title,
+      input.workspacePath ?? null,
+      JSON.stringify({}),
+    ]);
+    return mapRow(row);
   }
 
   async findById(id: string): Promise<LoopRow | null> {
-    const result = await this.pool.query<LoopRow>(
-      'SELECT * FROM loops WHERE id = $1',
+    const row = await dbQueryOne<LoopRow>(
+      this.pool,
+      'SELECT * FROM loops WHERE id = ?',
       [id],
     );
-    return result.rows[0] ?? null;
+    return row ? mapRow(row) : null;
   }
 
   async updatePhase(
@@ -46,27 +63,25 @@ export class LoopRepository {
     phase: Phase,
     status?: LoopStatus,
   ): Promise<LoopRow> {
-    const result = await this.pool.query<LoopRow>(
-      `UPDATE loops
-       SET phase = $2,
-           status = COALESCE($3, status),
-           updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
-      [id, phase, status ?? null],
+    const row = await updateReturning<LoopRow>(
+      this.pool,
+      'loops',
+      'phase = ?, status = COALESCE(?, status), updated_at = NOW(3)',
+      id,
+      [phase, status ?? null],
     );
-    return result.rows[0]!;
+    return mapRow(row);
   }
 
   async updateWorkspacePath(id: string, workspacePath: string): Promise<LoopRow> {
-    const result = await this.pool.query<LoopRow>(
-      `UPDATE loops
-       SET workspace_path = $2, updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
-      [id, workspacePath],
+    const row = await updateReturning<LoopRow>(
+      this.pool,
+      'loops',
+      'workspace_path = ?, updated_at = NOW(3)',
+      id,
+      [workspacePath],
     );
-    return result.rows[0]!;
+    return mapRow(row);
   }
 
   async updateGit(
@@ -74,32 +89,33 @@ export class LoopRepository {
     gitBranch: string,
     workspacePath: string,
   ): Promise<LoopRow> {
-    const result = await this.pool.query<LoopRow>(
-      `UPDATE loops
-       SET git_branch = $2, workspace_path = $3, updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
-      [id, gitBranch, workspacePath],
+    const row = await updateReturning<LoopRow>(
+      this.pool,
+      'loops',
+      'git_branch = ?, workspace_path = ?, updated_at = NOW(3)',
+      id,
+      [gitBranch, workspacePath],
     );
-    return result.rows[0]!;
+    return mapRow(row);
   }
 
   async updateContext(id: string, context: LoopContext): Promise<LoopRow> {
-    const result = await this.pool.query<LoopRow>(
-      `UPDATE loops
-       SET context = $2::jsonb, updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
-      [id, JSON.stringify(context)],
+    const row = await updateReturning<LoopRow>(
+      this.pool,
+      'loops',
+      'context = ?, updated_at = NOW(3)',
+      id,
+      [JSON.stringify(context)],
     );
-    return result.rows[0]!;
+    return mapRow(row);
   }
 
   async listByProject(projectId: string): Promise<LoopRow[]> {
-    const result = await this.pool.query<LoopRow>(
-      'SELECT * FROM loops WHERE project_id = $1 ORDER BY created_at DESC',
+    const rows = await dbQuery<LoopRow>(
+      this.pool,
+      'SELECT * FROM loops WHERE project_id = ? ORDER BY created_at DESC',
       [projectId],
     );
-    return result.rows;
+    return rows.map(mapRow);
   }
 }

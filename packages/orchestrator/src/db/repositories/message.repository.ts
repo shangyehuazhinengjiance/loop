@@ -1,6 +1,6 @@
 import type { LoopMessage, Phase } from '@loop/shared';
-import type pg from 'pg';
-import { v4 as uuidv4 } from 'uuid';
+import { dbQuery, dbQueryOne, insertReturning, parseJsonField } from '../query.js';
+import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
 
 export interface MessageRow {
@@ -13,8 +13,15 @@ export interface MessageRow {
   created_at: Date;
 }
 
+function mapRow(row: MessageRow): MessageRow {
+  return {
+    ...row,
+    content: parseJsonField(row.content, {}),
+  };
+}
+
 export class MessageRepository {
-  constructor(private readonly pool: pg.Pool = getPool()) {}
+  constructor(private readonly pool: DbPool = getPool()) {}
 
   async create(input: {
     loopId: string;
@@ -23,19 +30,20 @@ export class MessageRepository {
     senderId: string;
     content: LoopMessage['content'];
   }): Promise<MessageRow> {
-    const result = await this.pool.query<MessageRow>(
-      `INSERT INTO messages (loop_id, phase, sender_type, sender_id, content)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       RETURNING *`,
-      [
-        input.loopId,
-        input.phase,
-        input.senderType,
-        input.senderId,
-        JSON.stringify(input.content),
-      ],
-    );
-    return result.rows[0]!;
+    const row = await insertReturning<MessageRow>(this.pool, 'messages', [
+      'loop_id',
+      'phase',
+      'sender_type',
+      'sender_id',
+      'content',
+    ], [
+      input.loopId,
+      input.phase,
+      input.senderType,
+      input.senderId,
+      JSON.stringify(input.content),
+    ]);
+    return mapRow(row);
   }
 
   async listByLoop(
@@ -44,35 +52,38 @@ export class MessageRepository {
     before?: string,
   ): Promise<MessageRow[]> {
     if (before) {
-      const result = await this.pool.query<MessageRow>(
+      const rows = await dbQuery<MessageRow>(
+        this.pool,
         `SELECT * FROM messages
-         WHERE loop_id = $1 AND created_at < (SELECT created_at FROM messages WHERE id = $2)
+         WHERE loop_id = ? AND created_at < (SELECT created_at FROM messages WHERE id = ?)
          ORDER BY created_at DESC
-         LIMIT $3`,
+         LIMIT ?`,
         [loopId, before, limit],
       );
-      return result.rows.reverse();
+      return rows.reverse().map(mapRow);
     }
 
-    const result = await this.pool.query<MessageRow>(
+    const rows = await dbQuery<MessageRow>(
+      this.pool,
       `SELECT * FROM messages
-       WHERE loop_id = $1
+       WHERE loop_id = ?
        ORDER BY created_at ASC
-       LIMIT $2`,
+       LIMIT ?`,
       [loopId, limit],
     );
-    return result.rows;
+    return rows.map(mapRow);
   }
 
   async latestId(loopId: string): Promise<string | null> {
-    const result = await this.pool.query<{ id: string }>(
+    const row = await dbQueryOne<{ id: string }>(
+      this.pool,
       `SELECT id FROM messages
-       WHERE loop_id = $1
+       WHERE loop_id = ?
        ORDER BY created_at DESC
        LIMIT 1`,
       [loopId],
     );
-    return result.rows[0]?.id ?? null;
+    return row?.id ?? null;
   }
 
   toLoopMessage(row: MessageRow, displayName: string): LoopMessage {

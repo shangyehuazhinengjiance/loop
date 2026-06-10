@@ -1,4 +1,5 @@
-import type pg from 'pg';
+import { dbQuery, insertReturning, parseJsonField } from '../query.js';
+import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
 
 export interface AuditRow {
@@ -10,8 +11,15 @@ export interface AuditRow {
   created_at: Date;
 }
 
+function mapRow(row: AuditRow): AuditRow {
+  return {
+    ...row,
+    detail: parseJsonField(row.detail, {}),
+  };
+}
+
 export class AuditRepository {
-  constructor(private readonly pool: pg.Pool = getPool()) {}
+  constructor(private readonly pool: DbPool = getPool()) {}
 
   async create(input: {
     loopId: string;
@@ -19,28 +27,29 @@ export class AuditRepository {
     action: string;
     detail?: Record<string, unknown>;
   }): Promise<AuditRow> {
-    const result = await this.pool.query<AuditRow>(
-      `INSERT INTO audit_logs (loop_id, agent, action, detail)
-       VALUES ($1, $2, $3, $4::jsonb)
-       RETURNING *`,
-      [
-        input.loopId,
-        input.agent ?? null,
-        input.action,
-        JSON.stringify(input.detail ?? {}),
-      ],
-    );
-    return result.rows[0]!;
+    const row = await insertReturning<AuditRow>(this.pool, 'audit_logs', [
+      'loop_id',
+      'agent',
+      'action',
+      'detail',
+    ], [
+      input.loopId,
+      input.agent ?? null,
+      input.action,
+      JSON.stringify(input.detail ?? {}),
+    ]);
+    return mapRow(row);
   }
 
   async listByLoop(loopId: string, limit = 100): Promise<AuditRow[]> {
-    const result = await this.pool.query<AuditRow>(
+    const rows = await dbQuery<AuditRow>(
+      this.pool,
       `SELECT * FROM audit_logs
-       WHERE loop_id = $1
+       WHERE loop_id = ?
        ORDER BY created_at DESC
-       LIMIT $2`,
+       LIMIT ?`,
       [loopId, limit],
     );
-    return result.rows;
+    return rows.map(mapRow);
   }
 }

@@ -1,5 +1,6 @@
 import type { ApprovalActionType, Phase } from '@loop/shared';
-import type pg from 'pg';
+import { dbQuery, dbQueryOne, insertReturning } from '../query.js';
+import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
 
 export interface ApprovalRow {
@@ -13,7 +14,7 @@ export interface ApprovalRow {
 }
 
 export class ApprovalRepository {
-  constructor(private readonly pool: pg.Pool = getPool()) {}
+  constructor(private readonly pool: DbPool = getPool()) {}
 
   async create(input: {
     loopId: string;
@@ -22,19 +23,19 @@ export class ApprovalRepository {
     phase: Phase;
     note?: string;
   }): Promise<ApprovalRow> {
-    const result = await this.pool.query<ApprovalRow>(
-      `INSERT INTO approvals (loop_id, action, approved_by, note, phase)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [
-        input.loopId,
-        input.action,
-        input.approvedBy,
-        input.note ?? null,
-        input.phase,
-      ],
-    );
-    return result.rows[0]!;
+    return insertReturning<ApprovalRow>(this.pool, 'approvals', [
+      'loop_id',
+      'action',
+      'approved_by',
+      'note',
+      'phase',
+    ], [
+      input.loopId,
+      input.action,
+      input.approvedBy,
+      input.note ?? null,
+      input.phase,
+    ]);
   }
 
   async hasApprovalInPhase(
@@ -42,19 +43,20 @@ export class ApprovalRepository {
     action: ApprovalActionType,
     phase: Phase,
   ): Promise<boolean> {
-    const result = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM approvals
-       WHERE loop_id = $1 AND action = $2 AND phase = $3`,
+    const row = await dbQueryOne<{ count: number }>(
+      this.pool,
+      `SELECT COUNT(*) AS count FROM approvals
+       WHERE loop_id = ? AND action = ? AND phase = ?`,
       [loopId, action, phase],
     );
-    return parseInt(result.rows[0]?.count ?? '0', 10) > 0;
+    return Number(row?.count ?? 0) > 0;
   }
 
   async listByLoop(loopId: string): Promise<ApprovalRow[]> {
-    const result = await this.pool.query<ApprovalRow>(
-      'SELECT * FROM approvals WHERE loop_id = $1 ORDER BY created_at ASC',
+    return dbQuery<ApprovalRow>(
+      this.pool,
+      'SELECT * FROM approvals WHERE loop_id = ? ORDER BY created_at ASC',
       [loopId],
     );
-    return result.rows;
   }
 }

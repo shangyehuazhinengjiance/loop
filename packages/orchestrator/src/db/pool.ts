@@ -1,15 +1,14 @@
-import pg from 'pg';
+import mysql from 'mysql2/promise';
 
-const { Pool } = pg;
+export type DbPool = mysql.Pool;
 
-let pool: pg.Pool | null = null;
+let pool: DbPool | null = null;
 
-export function getPool(): pg.Pool {
+export function getPool(): DbPool {
   if (!pool) {
     const connectionString =
-      process.env.DATABASE_URL ??
-      'postgresql://loop:loop@localhost:5432/loop';
-    pool = new Pool({ connectionString });
+      process.env.DATABASE_URL ?? 'mysql://loop:loop@localhost:3306/loop';
+    pool = mysql.createPool(connectionString);
   }
   return pool;
 }

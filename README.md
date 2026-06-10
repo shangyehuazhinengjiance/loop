@@ -10,7 +10,7 @@
 
 | Sprint | 能力 |
 |--------|------|
-| **Sprint 1** | Phase 状态机、PostgreSQL、WebSocket Gateway、Web UI、PM/Dev Agent、ModelRouter |
+| **Sprint 1** | Phase 状态机、MySQL、WebSocket Gateway、Web UI、PM/Dev Agent、ModelRouter |
 | **Sprint 2** | Git 工作区、凭证管理、Snapshot+标签、Ops Agent、阶段审批、回退+git checkout |
 | **Sprint 3** | Dev Subagents、MCP 配置、LiteLLM、历史回放、Artifact 版本、沙箱、审计日志 |
 
@@ -29,7 +29,7 @@ packages/
 config/
 ├── agents.yaml       # 默认模型配置
 └── litellm.yaml      # LiteLLM 网关（可选）
-migrations/           # PostgreSQL 迁移
+migrations/           # MySQL 迁移
 scripts/              # E2E 冒烟脚本
 ```
 

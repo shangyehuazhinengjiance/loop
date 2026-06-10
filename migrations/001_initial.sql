@@ -1,82 +1,85 @@
--- AI Native Loop — 初始 Schema
--- 对应 DESIGN.md §10
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- AI Native Loop — 初始 Schema（MySQL 8.0+）
 
 CREATE TABLE projects (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name          TEXT NOT NULL,
-  git_config    JSONB NOT NULL DEFAULT '{}',
-  model_config  JSONB NOT NULL DEFAULT '{}',
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  id            CHAR(36) PRIMARY KEY,
+  name          VARCHAR(255) NOT NULL,
+  git_config    JSON NOT NULL,
+  model_config  JSON NOT NULL,
+  created_at    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
 );
 
 CREATE TABLE loops (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  title           TEXT NOT NULL,
-  status          TEXT NOT NULL DEFAULT 'active',
-  phase           TEXT NOT NULL DEFAULT 'created',
-  git_branch      TEXT,
-  workspace_path  TEXT,
-  context         JSONB NOT NULL DEFAULT '{}',
-  model_overrides JSONB,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  id              CHAR(36) PRIMARY KEY,
+  project_id      CHAR(36) NOT NULL,
+  title           VARCHAR(512) NOT NULL,
+  status          VARCHAR(64) NOT NULL DEFAULT 'active',
+  phase           VARCHAR(64) NOT NULL DEFAULT 'created',
+  git_branch      VARCHAR(255) NULL,
+  workspace_path  TEXT NULL,
+  context         JSON NOT NULL,
+  model_overrides JSON NULL,
+  created_at      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_loops_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_loops_project_id ON loops(project_id);
 CREATE INDEX idx_loops_phase ON loops(phase);
 
 CREATE TABLE messages (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id     UUID NOT NULL REFERENCES loops(id) ON DELETE CASCADE,
-  phase       TEXT NOT NULL,
-  sender_type TEXT NOT NULL,
-  sender_id   TEXT NOT NULL,
-  content     JSONB NOT NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id          CHAR(36) PRIMARY KEY,
+  loop_id     CHAR(36) NOT NULL,
+  phase       VARCHAR(64) NOT NULL,
+  sender_type VARCHAR(64) NOT NULL,
+  sender_id   VARCHAR(255) NOT NULL,
+  content     JSON NOT NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_messages_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_messages_loop_id ON messages(loop_id, created_at);
 
 CREATE TABLE snapshots (
-  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id           UUID NOT NULL REFERENCES loops(id) ON DELETE CASCADE,
-  phase             TEXT NOT NULL,
-  label             TEXT,
-  prd               JSONB,
-  tasks             JSONB,
-  git_ref           TEXT,
-  git_branch        TEXT,
-  dev_session_id    TEXT,
-  message_watermark UUID,
-  created_by        TEXT,
-  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                CHAR(36) PRIMARY KEY,
+  loop_id           CHAR(36) NOT NULL,
+  phase             VARCHAR(64) NOT NULL,
+  label             VARCHAR(255) NULL,
+  prd               JSON NULL,
+  tasks             JSON NULL,
+  git_ref           VARCHAR(255) NULL,
+  git_branch        VARCHAR(255) NULL,
+  dev_session_id    VARCHAR(255) NULL,
+  message_watermark CHAR(36) NULL,
+  created_by        VARCHAR(255) NULL,
+  created_at        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_snapshots_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_snapshots_loop_id ON snapshots(loop_id, created_at DESC);
 
 CREATE TABLE approvals (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id     UUID NOT NULL REFERENCES loops(id) ON DELETE CASCADE,
-  action      TEXT NOT NULL,
-  approved_by TEXT NOT NULL,
-  note        TEXT,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id          CHAR(36) PRIMARY KEY,
+  loop_id     CHAR(36) NOT NULL,
+  action      VARCHAR(64) NOT NULL,
+  approved_by VARCHAR(255) NOT NULL,
+  note        TEXT NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_approvals_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_approvals_loop_id ON approvals(loop_id);
 
 CREATE TABLE phase_transitions (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id     UUID NOT NULL REFERENCES loops(id) ON DELETE CASCADE,
-  from_phase  TEXT,
-  to_phase    TEXT NOT NULL,
-  trigger     TEXT NOT NULL,
-  snapshot_id UUID REFERENCES snapshots(id),
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id          CHAR(36) PRIMARY KEY,
+  loop_id     CHAR(36) NOT NULL,
+  from_phase  VARCHAR(64) NULL,
+  to_phase    VARCHAR(64) NOT NULL,
+  `trigger`   VARCHAR(64) NOT NULL,
+  snapshot_id CHAR(36) NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_phase_transitions_loop FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE,
+  CONSTRAINT fk_phase_transitions_snapshot FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
 );
 
 CREATE INDEX idx_phase_transitions_loop_id ON phase_transitions(loop_id, created_at DESC);

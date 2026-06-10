@@ -3,7 +3,7 @@
 > **代码仓库**：https://github.com/shangyehuazhinengjiance/loop  
 > 前置条件：三个镜像已构建并推送到公司镜像仓库  
 > `loop-orchestrator` / `loop-gateway` / `loop-web`  
-> PostgreSQL 使用公司托管实例（集群外）
+> MySQL 使用公司托管实例（集群外）
 
 ---
 
@@ -19,7 +19,7 @@
            │          :3000                  │
            │               │                 │
            │               ▼                 │
-           │         公司 PostgreSQL         │
+           │         公司 MySQL              │
            │               │                 │
            └───────────────┴─────────────────┘
                     （Web 调 API + WS）
@@ -46,13 +46,13 @@ image: harbor.qihoo.net/ai-native/loop-orchestrator:latest
 
 替换为你们 Jenkins 实际推送的地址和 tag（建议用 `$BUILD_NUMBER` 或 git commit sha，生产避免 `latest`）。
 
-### 2. 公司 PostgreSQL
+### 2. 公司 MySQL
 
 向 DBA 申请：
 
 - 主机、端口、库名（如 `loop`）
 - 账号、密码
-- 是否要求 `sslmode=require`
+- 是否要求 SSL（连接串可加 `?ssl=true`）
 
 连接串写入 Secret 的 `DATABASE_URL`。
 
@@ -106,7 +106,7 @@ kubectl apply -f deploy/k8s/secret.yaml
 
 ```bash
 kubectl create secret generic loop-secrets -n loop \
-  --from-literal=DATABASE_URL='postgresql://user:pass@pg-host:5432/loop' \
+  --from-literal=DATABASE_URL='mysql://user:pass@mysql-host:3306/loop' \
   --from-literal=PM_MODEL_API_KEY='sk-xxx' \
   --from-literal=DEV_MODEL_API_KEY='sk-xxx' \
   --from-literal=OPS_MODEL_API_KEY='sk-xxx'
@@ -207,7 +207,7 @@ kubectl apply -f deploy/k8s/ingress.yaml
 
 | 变量 | 来源 | 必填 | 说明 |
 |------|------|------|------|
-| `DATABASE_URL` | Secret | ✅ | PostgreSQL 连接串 |
+| `DATABASE_URL` | Secret | ✅ | MySQL 连接串 |
 | `PM_MODEL_API_KEY` | Secret | ✅ | |
 | `DEV_MODEL_API_KEY` | Secret | ✅ | |
 | `OPS_MODEL_API_KEY` | Secret | ✅ | |
@@ -267,7 +267,7 @@ A：检查 web 镜像构建时的 `NEXT_PUBLIC_ORCHESTRATOR_URL` 是否为用户
 A：检查 `NEXT_PUBLIC_WS_URL` 是否为 `wss://` 且 Ingress 支持 WebSocket 长连接。
 
 **Q：Orchestrator Pod 启动后 Crash？**  
-A：`kubectl logs deployment/loop-orchestrator -n loop`，常见为 `DATABASE_URL` 错误或连不上 PG。
+A：`kubectl logs deployment/loop-orchestrator -n loop`，常见为 `DATABASE_URL` 错误或连不上 MySQL。
 
 **Q：Dev Agent 写不了代码？**  
 A：检查 PVC 是否 Bound，`WORKSPACE_ROOT` 与 mountPath 是否一致。

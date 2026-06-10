@@ -1,5 +1,6 @@
 import type { Phase, PhaseTransitionTrigger } from '@loop/shared';
-import type pg from 'pg';
+import { dbQuery, insertReturning } from '../query.js';
+import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
 
 export interface PhaseTransitionRow {
@@ -13,7 +14,7 @@ export interface PhaseTransitionRow {
 }
 
 export class PhaseTransitionRepository {
-  constructor(private readonly pool: pg.Pool = getPool()) {}
+  constructor(private readonly pool: DbPool = getPool()) {}
 
   async create(input: {
     loopId: string;
@@ -22,10 +23,10 @@ export class PhaseTransitionRepository {
     trigger: PhaseTransitionTrigger;
     snapshotId?: string;
   }): Promise<PhaseTransitionRow> {
-    const result = await this.pool.query<PhaseTransitionRow>(
-      `INSERT INTO phase_transitions (loop_id, from_phase, to_phase, trigger, snapshot_id)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
+    return insertReturning<PhaseTransitionRow>(
+      this.pool,
+      'phase_transitions',
+      ['loop_id', 'from_phase', 'to_phase', 'trigger', 'snapshot_id'],
       [
         input.loopId,
         input.fromPhase,
@@ -34,14 +35,13 @@ export class PhaseTransitionRepository {
         input.snapshotId ?? null,
       ],
     );
-    return result.rows[0]!;
   }
 
   async listByLoop(loopId: string): Promise<PhaseTransitionRow[]> {
-    const result = await this.pool.query<PhaseTransitionRow>(
-      'SELECT * FROM phase_transitions WHERE loop_id = $1 ORDER BY created_at ASC',
+    return dbQuery<PhaseTransitionRow>(
+      this.pool,
+      'SELECT * FROM phase_transitions WHERE loop_id = ? ORDER BY created_at ASC',
       [loopId],
     );
-    return result.rows;
   }
 }

@@ -1,6 +1,6 @@
 # Docker 构建与 CI/CD 参考
 
-> PostgreSQL / Redis 使用公司托管服务，镜像内不包含数据库。
+> MySQL / Redis 使用公司托管服务，镜像内不包含数据库。
 > PM / Dev / Ops Agent 作为库内嵌在 **orchestrator** 镜像中，无需单独构建。
 
 ## 镜像列表
@@ -111,7 +111,7 @@ docker push $REGISTRY/loop-web:$TAG
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `DATABASE_URL` | 是 | 公司 PostgreSQL 连接串 |
+| `DATABASE_URL` | 是 | 公司 MySQL 连接串 |
 | `PM_MODEL_API_KEY` | 是 | PM Agent |
 | `DEV_MODEL_API_KEY` | 是 | Dev Agent |
 | `OPS_MODEL_API_KEY` | 是 | Ops Agent |

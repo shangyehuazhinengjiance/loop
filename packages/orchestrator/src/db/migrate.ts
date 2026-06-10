@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { dbQuery } from './query.js';
 import { getPool, closePool } from './pool.js';
 
 dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '../../../../.env') });
@@ -11,20 +12,29 @@ const MIGRATIONS_DIR = join(
   '../../../../migrations',
 );
 
+function splitSqlStatements(sql: string): string[] {
+  const withoutComments = sql.replace(/--.*$/gm, '');
+  return withoutComments
+    .split(';')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 async function migrate(): Promise<void> {
   const pool = getPool();
 
-  await pool.query(`
+  await pool.execute(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
-      version TEXT PRIMARY KEY,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      version VARCHAR(255) PRIMARY KEY,
+      applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     )
   `);
 
-  const applied = await pool.query<{ version: string }>(
+  const appliedRows = await dbQuery<{ version: string }>(
+    pool,
     'SELECT version FROM schema_migrations ORDER BY version',
   );
-  const appliedSet = new Set(applied.rows.map((r) => r.version));
+  const appliedSet = new Set(appliedRows.map((r) => r.version));
 
   const files = readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith('.sql'))
@@ -37,21 +47,25 @@ async function migrate(): Promise<void> {
     }
 
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf-8');
-    const client = await pool.connect();
+    const statements = splitSqlStatements(sql);
+    const conn = await pool.getConnection();
+
     try {
-      await client.query('BEGIN');
-      await client.query(sql);
-      await client.query(
-        'INSERT INTO schema_migrations (version) VALUES ($1)',
+      await conn.beginTransaction();
+      for (const statement of statements) {
+        await conn.execute(statement);
+      }
+      await conn.execute(
+        'INSERT INTO schema_migrations (version) VALUES (?)',
         [file],
       );
-      await client.query('COMMIT');
+      await conn.commit();
       console.log(`applied ${file}`);
     } catch (err) {
-      await client.query('ROLLBACK');
+      await conn.rollback();
       throw err;
     } finally {
-      client.release();
+      conn.release();
     }
   }
 

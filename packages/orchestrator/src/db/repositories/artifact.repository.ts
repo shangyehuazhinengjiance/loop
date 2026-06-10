@@ -1,5 +1,6 @@
 import type { ArtifactRecord, ArtifactType, Phase } from '@loop/shared';
-import type pg from 'pg';
+import { dbQuery, dbQueryOne, insertReturning, parseJsonField } from '../query.js';
+import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
 
 export interface ArtifactRow {
@@ -15,8 +16,15 @@ export interface ArtifactRow {
   created_at: Date;
 }
 
+function mapRow(row: ArtifactRow): ArtifactRow {
+  return {
+    ...row,
+    content: parseJsonField(row.content, {}),
+  };
+}
+
 export class ArtifactRepository {
-  constructor(private readonly pool: pg.Pool = getPool()) {}
+  constructor(private readonly pool: DbPool = getPool()) {}
 
   async create(input: {
     loopId: string;
@@ -30,23 +38,26 @@ export class ArtifactRepository {
     const latest = await this.findLatest(input.loopId, input.type, input.name);
     const version = (latest?.version ?? 0) + 1;
 
-    const result = await this.pool.query<ArtifactRow>(
-      `INSERT INTO artifacts (
-         loop_id, phase, type, name, version, content, diff_from, created_by
-       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
-       RETURNING *`,
-      [
-        input.loopId,
-        input.phase,
-        input.type,
-        input.name,
-        version,
-        JSON.stringify(input.content),
-        input.diffFrom ?? latest?.id ?? null,
-        input.createdBy,
-      ],
-    );
-    return result.rows[0]!;
+    const row = await insertReturning<ArtifactRow>(this.pool, 'artifacts', [
+      'loop_id',
+      'phase',
+      'type',
+      'name',
+      'version',
+      'content',
+      'diff_from',
+      'created_by',
+    ], [
+      input.loopId,
+      input.phase,
+      input.type,
+      input.name,
+      version,
+      JSON.stringify(input.content),
+      input.diffFrom ?? latest?.id ?? null,
+      input.createdBy,
+    ]);
+    return mapRow(row);
   }
 
   async findLatest(
@@ -54,29 +65,32 @@ export class ArtifactRepository {
     type: ArtifactType,
     name: string,
   ): Promise<ArtifactRow | null> {
-    const result = await this.pool.query<ArtifactRow>(
+    const row = await dbQueryOne<ArtifactRow>(
+      this.pool,
       `SELECT * FROM artifacts
-       WHERE loop_id = $1 AND type = $2 AND name = $3
+       WHERE loop_id = ? AND type = ? AND name = ?
        ORDER BY version DESC LIMIT 1`,
       [loopId, type, name],
     );
-    return result.rows[0] ?? null;
+    return row ? mapRow(row) : null;
   }
 
   async findById(id: string): Promise<ArtifactRow | null> {
-    const result = await this.pool.query<ArtifactRow>(
-      'SELECT * FROM artifacts WHERE id = $1',
+    const row = await dbQueryOne<ArtifactRow>(
+      this.pool,
+      'SELECT * FROM artifacts WHERE id = ?',
       [id],
     );
-    return result.rows[0] ?? null;
+    return row ? mapRow(row) : null;
   }
 
   async listByLoop(loopId: string): Promise<ArtifactRow[]> {
-    const result = await this.pool.query<ArtifactRow>(
-      'SELECT * FROM artifacts WHERE loop_id = $1 ORDER BY created_at ASC',
+    const rows = await dbQuery<ArtifactRow>(
+      this.pool,
+      'SELECT * FROM artifacts WHERE loop_id = ? ORDER BY created_at ASC',
       [loopId],
     );
-    return result.rows;
+    return rows.map(mapRow);
   }
 
   toRecord(row: ArtifactRow): ArtifactRecord {
