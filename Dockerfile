@@ -1,6 +1,7 @@
+# syntax=docker/dockerfile:1.4
 # AI Native Loop — Orchestrator（请在仓库根目录构建）
 #
-#   docker build -f Dockerfile -t loop-orchestrator .
+#   DOCKER_BUILDKIT=1 docker build -f Dockerfile -t loop-orchestrator .
 #                                 最后一个参数必须是 .
 #
 # 若报错 packages/shared/package.json not found，
@@ -13,12 +14,13 @@ WORKDIR /app
 # 校验 build context（缺少则说明 context 不是仓库根目录）
 COPY packages/shared/package.json ./packages/shared/package.json
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY config ./config
 COPY migrations ./migrations
 
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 RUN npm run build -w @loop/shared \
  && npm run build -w @loop/agent-pm \
@@ -38,14 +40,16 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV ORCHESTRATOR_PORT=3000
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/orchestrator/package.json ./packages/orchestrator/
 COPY packages/agents/pm/package.json ./packages/agents/pm/
 COPY packages/agents/dev/package.json ./packages/agents/dev/
 COPY packages/agents/ops/package.json ./packages/agents/ops/
 
-RUN npm install --omit=dev
+# runner 仅复制部分 workspace，使用 npm install（配合 cache mount 加速重复构建）
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --omit=dev
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/agents/pm/dist ./packages/agents/pm/dist
