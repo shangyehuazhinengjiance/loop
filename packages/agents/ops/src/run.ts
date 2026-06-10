@@ -1,5 +1,6 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import type { Phase, ResolvedModelConfig } from '@loop/shared';
+import { runOpsAgentOpenAI } from './openai-agent.js';
 import { buildOpsPrompt } from './prompts.js';
 import { OrchestratorApi } from './orchestrator-api.js';
 
@@ -9,6 +10,7 @@ export interface RunOpsAgentInput {
   model: ResolvedModelConfig;
   workspacePath: string;
   phase: Phase;
+  memberRoster?: string;
   signal?: AbortSignal;
 }
 
@@ -28,7 +30,38 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
   const api = new OrchestratorApi(input.orchestratorUrl);
   const loop = await api.getLoop(input.loopId);
 
-  const prompt = buildOpsPrompt(loop.context, loop.title);
+  if (input.model.runtime === 'client-sdk') {
+    if (!input.model.apiKey?.trim()) {
+      throw new Error('OPS_MODEL_API_KEY 未配置');
+    }
+    if (!input.model.baseUrl?.trim()) {
+      throw new Error('OPS_MODEL_BASE_URL 未配置（client-sdk 模式必填）');
+    }
+    console.info(
+      `[ops-agent] loop=${input.loopId} runtime=client-sdk model=${input.model.model}`,
+    );
+    await runOpsAgentOpenAI({
+      api,
+      loopId: input.loopId,
+      phase: input.phase,
+      title: loop.title,
+      context: loop.context,
+      workspacePath: input.workspacePath,
+      memberRoster: input.memberRoster,
+      model: input.model,
+      signal: input.signal,
+    });
+    return;
+  }
+
+  if (!input.model.model.toLowerCase().includes('claude')) {
+    throw new Error(
+      `agent-sdk 模式仅支持 Claude 模型，当前为 "${input.model.model}"。` +
+        '请设置 OPS_AGENT_RUNTIME=client-sdk。',
+    );
+  }
+
+  const prompt = buildOpsPrompt(loop.context, loop.title, input.memberRoster);
   let sessionId = loop.context.opsSessionId;
 
   const env: Record<string, string> = { ...input.model.extra };

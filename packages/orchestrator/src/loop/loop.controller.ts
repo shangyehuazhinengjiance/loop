@@ -9,7 +9,13 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { WorkspaceJobService } from '../workspace/workspace-job.service.js';
+import { BlockerService } from '../blocker/blocker.service.js';
+import { LoopMemberService } from '../member/loop-member.service.js';
+import type { BlockerAgentId, BlockerKind } from '@loop/shared';
 import { ApprovalService } from '../approval/approval.service.js';
 import { ArtifactService } from '../artifact/artifact.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -31,6 +37,9 @@ export class LoopController {
     private readonly artifactService: ArtifactService,
     private readonly auditService: AuditService,
     private readonly replayService: ReplayService,
+    private readonly workspaceJobs: WorkspaceJobService,
+    private readonly memberService: LoopMemberService,
+    private readonly blockerService: BlockerService,
   ) {}
 
   @Get('projects')
@@ -99,9 +108,114 @@ export class LoopController {
     return this.loopService.startLoop(id);
   }
 
+  /** 默认异步（202），避免 clone + 摘要生成超时；?sync=true 保持旧行为 */
   @Post('loops/:id/reinit-workspace')
-  async reinitWorkspace(@Param('id') id: string) {
-    return this.loopService.reinitWorkspace(id);
+  async reinitWorkspace(
+    @Param('id') id: string,
+    @Query('sync') sync: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (sync === 'true' || sync === '1') {
+      const result = await this.loopService.reinitWorkspace(id);
+      return { sync: true, result };
+    }
+    const job = this.loopService.reinitWorkspaceAsync(id);
+    res.status(202);
+    return {
+      accepted: true,
+      job,
+      pollUrl: `/api/loops/${id}/workspace-jobs/${job.id}`,
+    };
+  }
+
+  @Get('loops/:id/workspace-jobs/latest')
+  async latestWorkspaceJob(@Param('id') id: string) {
+    const job = this.workspaceJobs.getLatestForLoop(id);
+    if (!job) return { status: 'none' as const };
+    return job;
+  }
+
+  @Get('loops/:id/workspace-jobs/:jobId')
+  async getWorkspaceJob(@Param('id') loopId: string, @Param('jobId') jobId: string) {
+    const job = this.workspaceJobs.getJob(jobId);
+    if (!job || job.loopId !== loopId) {
+      throw new NotFoundException('Workspace job not found');
+    }
+    return job;
+  }
+
+  @Get('loops/:id/members')
+  async listMembers(@Param('id') id: string) {
+    return this.memberService.list(id);
+  }
+
+  @Patch('loops/:id/members/me')
+  async updateMyMember(
+    @Param('id') id: string,
+    @Body() body: { userId: string; displayName?: string; bio?: string },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    const existing = await this.memberService.get(id, body.userId);
+    if (!existing) throw new NotFoundException('Member not found');
+    return this.memberService.join({
+      loopId: id,
+      userId: body.userId,
+      displayName: body.displayName?.trim() || existing.displayName,
+      bio: body.bio !== undefined ? body.bio : existing.bio,
+    });
+  }
+
+  @Post('loops/:id/members/join')
+  async joinLoop(
+    @Param('id') id: string,
+    @Body() body: { userId: string; displayName: string; bio?: string },
+  ) {
+    if (!body.userId || !body.displayName?.trim()) {
+      throw new BadRequestException('userId and displayName required');
+    }
+    return this.memberService.join({
+      loopId: id,
+      userId: body.userId,
+      displayName: body.displayName.trim(),
+      bio: body.bio ?? '',
+    });
+  }
+
+  @Post('loops/:id/blocker/resolve')
+  async resolveBlocker(
+    @Param('id') id: string,
+    @Body() body: { userId: string; note?: string },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    return this.blockerService.resolve({
+      loopId: id,
+      userId: body.userId,
+      note: body.note,
+    });
+  }
+
+  @Post('loops/:id/agent/blocker')
+  async agentRequestBlocker(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      requestedBy: BlockerAgentId;
+      kind: BlockerKind;
+      reason: string;
+      question?: string;
+      assigneeUserId?: string;
+      skillsHint?: string;
+    },
+  ) {
+    return this.blockerService.requestHumanHelp({
+      loopId: id,
+      requestedBy: body.requestedBy,
+      kind: body.kind,
+      reason: body.reason,
+      question: body.question,
+      assigneeUserId: body.assigneeUserId,
+      skillsHint: body.skillsHint,
+    });
   }
 
   @Post('loops/:id/rollback')

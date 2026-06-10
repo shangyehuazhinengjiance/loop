@@ -8,11 +8,17 @@ import {
   type ChangeEvent,
 } from 'react';
 
-const MENTION_OPTIONS = [
+const AGENT_MENTIONS = [
   { mention: '@pm-agent', label: 'PM Agent', desc: '需求与方案' },
   { mention: '@dev-agent', label: 'Dev Agent', desc: '开发与实现' },
   { mention: '@ops-agent', label: 'Ops Agent', desc: '部署与运维' },
 ] as const;
+
+export interface HumanMentionOption {
+  mention: string;
+  label: string;
+  desc: string;
+}
 
 interface MentionState {
   atIndex: number;
@@ -37,15 +43,23 @@ interface ChatInputProps {
   onChange: (value: string) => void;
   onSend: () => void;
   disabled?: boolean;
+  humanMentions?: HumanMentionOption[];
 }
 
-export function ChatInput({ value, onChange, onSend, disabled }: ChatInputProps) {
+export function ChatInput({
+  value,
+  onChange,
+  onSend,
+  disabled,
+  humanMentions = [],
+}: ChatInputProps) {
+  const mentionOptions = [...AGENT_MENTIONS, ...humanMentions];
   const inputRef = useRef<HTMLInputElement>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
   const filtered = mention
-    ? MENTION_OPTIONS.filter(
+    ? mentionOptions.filter(
         (opt) =>
           opt.mention.slice(1).toLowerCase().includes(mention.query.toLowerCase()) ||
           opt.label.toLowerCase().includes(mention.query.toLowerCase()),
@@ -169,7 +183,7 @@ export function ChatInput({ value, onChange, onSend, disabled }: ChatInputProps)
         onKeyUp={(e) =>
           syncMention(value, (e.target as HTMLInputElement).selectionStart ?? value.length)
         }
-        placeholder="输入消息… 输入 @ 提及 Agent"
+        placeholder="输入消息… 输入 @ 提及成员或 Agent"
         style={{
           width: '100%',
           boxSizing: 'border-box',

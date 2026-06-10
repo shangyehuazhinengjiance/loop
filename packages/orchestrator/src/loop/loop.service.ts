@@ -1,5 +1,5 @@
 import type { LoopContext, ProjectModelConfig } from '@loop/shared';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { join } from 'node:path';
 import type { LoopRow } from '../db/repositories/loop.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
@@ -9,6 +9,8 @@ import { PhaseService } from '../phase/phase.service.js';
 import { GitService } from '../git/git.service.js';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
+import { WorkspaceJobService } from '../workspace/workspace-job.service.js';
+import { LoopMemberService } from '../member/loop-member.service.js';
 
 @Injectable()
 export class LoopService {
@@ -20,6 +22,8 @@ export class LoopService {
     private readonly gitService: GitService,
     private readonly agentCoordinator: AgentCoordinator,
     private readonly codebaseSummary: CodebaseSummaryService,
+    private readonly workspaceJobs: WorkspaceJobService,
+    private readonly memberService: LoopMemberService,
   ) {}
 
   async createLoop(projectId: string, title: string): Promise<LoopRow> {
@@ -84,42 +88,12 @@ export class LoopService {
     return (await this.loopRepo.findById(loop.id))!;
   }
 
+  reinitWorkspaceAsync(loopId: string) {
+    return this.workspaceJobs.enqueueReinit(loopId);
+  }
+
   async reinitWorkspace(loopId: string) {
-    const loop = await this.loopRepo.findById(loopId);
-    if (!loop) throw new Error(`Loop not found: ${loopId}`);
-
-    const project = await this.projectRepo.findById(loop.project_id);
-    const gitConfig = project?.git_config as { remoteUrl?: string } | undefined;
-    if (!gitConfig?.remoteUrl) {
-      throw new Error(
-        'Project 未配置 gitConfig.remoteUrl。请先 PATCH /api/projects/:id 或设置 GIT_DEFAULT_REMOTE_URL。',
-      );
-    }
-
-    const result = await this.gitService.reinitLoopWorkspace(loopId);
-    const summary = await this.tryEnsureCodebaseSummary({
-      projectId: loop.project_id,
-      loopId,
-      workspacePath: result.workspacePath,
-      gitRef: result.gitRef,
-      remoteUrl: gitConfig.remoteUrl,
-      projectModelConfig: project?.model_config,
-    });
-    const summaryNote = summary
-      ? summary.cached
-        ? ` 已复用项目代码库摘要（${summary.path}）。`
-        : ` 已重新生成代码库摘要（${summary.path}）。`
-      : '';
-    await this.chatService.publishAgentMessage({
-      loopId,
-      phase: loop.phase,
-      agentId: 'orchestrator',
-      content: {
-        type: 'text',
-        body: `工作区已重新从 ${gitConfig.remoteUrl} 拉取，当前分支 ${result.gitBranch}。${summaryNote}`,
-      },
-    });
-    return result;
+    return this.workspaceJobs.executeReinitSync(loopId);
   }
 
   async updateProjectGitConfig(
@@ -156,12 +130,27 @@ export class LoopService {
       throw new Error(`Loop not found: ${input.loopId}`);
     }
 
+    await this.memberService.requireMember(input.loopId, input.userId);
+
     const mentions = [
       ...new Set([
         ...(input.mentions ?? []),
         ...this.extractMentions(input.body),
       ]),
     ];
+
+    const humanMentions = mentions.filter((m) => /^@human-/i.test(m));
+    if (humanMentions.length > 0) {
+      const members = await this.memberService.list(input.loopId);
+      const memberSet = new Set(members.map((m) => `@${m.userId}`));
+      for (const hm of humanMentions) {
+        if (!memberSet.has(hm)) {
+          throw new BadRequestException(
+            `只能 @ 已加入本 Loop 的成员：${hm}`,
+          );
+        }
+      }
+    }
 
     const message = await this.chatService.publishHumanMessage({
       loopId: input.loopId,

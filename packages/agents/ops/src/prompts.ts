@@ -1,6 +1,10 @@
 import type { LoopContext } from '@loop/shared';
 
-export function buildOpsPrompt(context: LoopContext, title: string): string {
+export function buildOpsPrompt(
+  context: LoopContext,
+  title: string,
+  memberRoster?: string,
+): string {
   const deployment = context.deployment
     ? JSON.stringify(context.deployment, null, 2)
     : '（尚未部署）';
@@ -13,12 +17,16 @@ ${title}
 ## 当前部署状态
 ${deployment}
 
+## Loop 成员（request_human_help 时从此选择）
+${memberRoster ?? '（成员名册未加载）'}
+
 ## 职责
 - 读取 Dev 产出（Dockerfile、package.json、CI 配置）
 - 生成/更新 CI/CD 配置
 - 部署到 staging 并在群聊发送 URL
 - 健康检查
 - 生产部署需 Human 点击「确认发布」
+- 权限/审批/环境问题无法自行解决时，调用 request_human_help
 
 ## 约束
 - 不写业务代码，仅运维相关文件

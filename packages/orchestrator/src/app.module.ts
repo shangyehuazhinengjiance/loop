@@ -24,6 +24,10 @@ import { PhaseService } from './phase/phase.service.js';
 import { ReplayService } from './replay/replay.service.js';
 import { SandboxService } from './sandbox/sandbox.service.js';
 import { CodebaseSummaryService } from './codebase/codebase-summary.service.js';
+import { WorkspaceJobService } from './workspace/workspace-job.service.js';
+import { BlockerService } from './blocker/blocker.service.js';
+import { LoopMemberService } from './member/loop-member.service.js';
+import { LoopMemberRepository } from './db/repositories/loop-member.repository.js';
 
 @Module({
   controllers: [LoopController, AgentController, ChatSseController],
@@ -50,6 +54,10 @@ import { CodebaseSummaryService } from './codebase/codebase-summary.service.js';
     ReplayService,
     SandboxService,
     CodebaseSummaryService,
+    WorkspaceJobService,
+    LoopMemberRepository,
+    LoopMemberService,
+    BlockerService,
   ],
 })
 export class AppModule {}

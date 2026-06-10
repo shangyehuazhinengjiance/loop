@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
+import { REQUEST_HUMAN_HELP_OPENAI_TOOL } from '@loop/shared';
 import { resolveWorkspacePath, validateBashCommand } from './security.js';
 
 const execFileAsync = promisify(execFile);
@@ -73,6 +74,8 @@ function globToRegExp(pattern: string): RegExp {
     .replace(/§§/g, '.*');
   return new RegExp(`^${escaped}$`);
 }
+
+export const REQUEST_HUMAN_HELP_TOOL = REQUEST_HUMAN_HELP_OPENAI_TOOL;
 
 export const DEV_TOOL_DEFINITIONS = [
   {

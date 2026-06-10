@@ -21,9 +21,9 @@ agents:
     permission_mode: acceptEdits
 
   ops:
-    provider: anthropic-compatible
+    provider: openai-compatible
     base_url: ${OPS_MODEL_BASE_URL}
     model: ${OPS_MODEL_NAME}
     api_key_env: OPS_MODEL_API_KEY
-    runtime: agent-sdk
+    runtime: client-sdk
     permission_mode: default

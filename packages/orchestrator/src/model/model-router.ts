@@ -121,6 +121,16 @@ export class ModelRouter {
       }
     }
 
+    if (agent === 'ops') {
+      const opsRuntime = process.env.OPS_AGENT_RUNTIME?.trim();
+      if (opsRuntime === 'client-sdk' || opsRuntime === 'agent-sdk') {
+        runtime = opsRuntime;
+      }
+      if (!merged.model.toLowerCase().includes('claude')) {
+        runtime = 'client-sdk';
+      }
+    }
+
     const extra: Record<string, string> = {};
     if (baseUrl) extra.ANTHROPIC_BASE_URL = baseUrl;
     if (merged.model) extra.ANTHROPIC_MODEL = merged.model;

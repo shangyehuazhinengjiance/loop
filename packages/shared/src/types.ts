@@ -6,7 +6,35 @@ export type Phase =
   | 'deployment'
   | 'done';
 
-export type LoopStatus = 'active' | 'done' | 'archived';
+export type LoopStatus = 'active' | 'blocked' | 'done' | 'archived';
+
+export type BlockerKind = 'human_input' | 'human_fix' | 'human_decision' | 'external';
+
+export type BlockerAgentId = 'pm-agent' | 'dev-agent' | 'ops-agent' | 'orchestrator';
+
+/** Loop 阻塞：Agent 搞不定时等待某成员处理（不改变 phase） */
+export interface LoopBlocker {
+  kind: BlockerKind;
+  phase: Phase;
+  reason: string;
+  question?: string;
+  assigneeUserId: string;
+  assigneeDisplayName: string;
+  requestedBy: BlockerAgentId;
+  createdAt: string;
+  lastReminderAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+}
+
+/** Loop 成员（per-Loop）；bio 为空表示「啥事都可以找」 */
+export interface LoopMember {
+  loopId: string;
+  userId: string;
+  displayName: string;
+  bio: string;
+  joinedAt: string;
+}
 
 export type ApprovalActionType =
   | 'approve_prd'
@@ -41,6 +69,9 @@ export interface Task {
   title: string;
   description: string;
   status: 'pending' | 'in_progress' | 'done';
+  /** 任务负责人（Loop 成员 userId） */
+  assigneeUserId?: string;
+  assigneeDisplayName?: string;
 }
 
 export interface DeploymentInfo {

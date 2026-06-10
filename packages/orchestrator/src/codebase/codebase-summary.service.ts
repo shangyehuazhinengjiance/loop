@@ -37,6 +37,10 @@ export class CodebaseSummaryService {
     return join(workspacePath, CODEBASE_SUMMARY_REL_PATH);
   }
 
+  async hasSummary(workspacePath: string): Promise<boolean> {
+    return this.pathExists(this.summaryPath(workspacePath));
+  }
+
   private projectCacheDir(projectId: string): string {
     const root = process.env.WORKSPACE_ROOT ?? './workspaces';
     return join(root, PROJECT_CACHE_DIR, projectId);

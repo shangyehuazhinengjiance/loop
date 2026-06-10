@@ -9,6 +9,7 @@ export interface RunDevAgentInput {
   orchestratorUrl: string;
   model: ResolvedModelConfig;
   workspacePath: string;
+  memberRoster?: string;
   sandboxMode?: 'local' | 'docker';
   signal?: AbortSignal;
 }
@@ -57,6 +58,7 @@ export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
       title: loop.title,
       context: loop.context,
       workspacePath: input.workspacePath,
+      memberRoster: input.memberRoster,
       model: input.model,
       signal: input.signal,
     });

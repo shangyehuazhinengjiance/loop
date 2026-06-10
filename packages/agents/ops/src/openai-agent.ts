@@ -1,20 +1,24 @@
 import type { ResolvedModelConfig } from '@loop/shared';
-import { buildDevPrompt } from './prompts.js';
-import type { OrchestratorApi } from './orchestrator-api.js';
 import {
   DEV_TOOL_DEFINITIONS,
-  REQUEST_HUMAN_HELP_TOOL,
   executeDevTool,
-  toolProgressMessage,
-} from './tools.js';
+  REQUEST_HUMAN_HELP_TOOL,
+} from '@loop/agent-dev';
+import { buildOpsPrompt } from './prompts.js';
+import type { OrchestratorApi } from './orchestrator-api.js';
+
+const OPS_TOOL_NAMES = new Set(['read_file', 'bash', 'glob', 'grep']);
+const OPS_TOOLS = [
+  ...DEV_TOOL_DEFINITIONS.filter((t) => OPS_TOOL_NAMES.has(t.function.name)),
+  REQUEST_HUMAN_HELP_TOOL,
+];
 
 const OPENAI_SYSTEM_SUFFIX = `
 ## 工具使用
-你可通过 function calling 使用 read_file、write_file、edit_file、bash、glob、grep、request_human_help。
-- 先读代码库摘要和关键文件，再动手改
-- 每次改完后用 bash 跑相关测试
-- 权限/环境/业务问题无法自行解决时，用 request_human_help @ 名册中的成员（bio 为空的成员可接各类问题）
-- 全部完成后用自然语言总结改动，并提示人类点击「验收通过」`;
+你可通过 function calling 使用 read_file、bash、glob、grep、request_human_help。
+- 先读 Dockerfile、CI 配置等运维相关文件
+- 权限/环境/审批问题无法自行解决时，用 request_human_help @ 名册中的成员
+- 部署完成后在回复中给出 staging URL`;
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -53,16 +57,16 @@ function parseToolArgs(raw: string): Record<string, unknown> {
 }
 
 function maxTurns(): number {
-  const n = parseInt(process.env.DEV_AGENT_MAX_TURNS ?? '30', 10);
-  return Number.isFinite(n) && n > 0 ? n : 30;
+  const n = parseInt(process.env.OPS_AGENT_MAX_TURNS ?? '25', 10);
+  return Number.isFinite(n) && n > 0 ? n : 25;
 }
 
-export async function runDevAgentOpenAI(input: {
+export async function runOpsAgentOpenAI(input: {
   api: OrchestratorApi;
   loopId: string;
   phase: string;
   title: string;
-  context: Parameters<typeof buildDevPrompt>[0];
+  context: Parameters<typeof buildOpsPrompt>[0];
   workspacePath: string;
   memberRoster?: string;
   model: ResolvedModelConfig;
@@ -72,18 +76,17 @@ export async function runDevAgentOpenAI(input: {
     {
       role: 'system',
       content:
-        buildDevPrompt(input.context, input.title, input.memberRoster) +
+        buildOpsPrompt(input.context, input.title, input.memberRoster) +
         OPENAI_SYSTEM_SUFFIX,
     },
     {
       role: 'user',
       content:
-        '请根据 PRD 和任务列表开始开发。可先尝试 read_file 读取 .loop/codebase-summary.md；若不存在则直接 glob/README 了解项目结构。',
+        '请根据当前部署状态完成 staging 部署准备。先读取工作区中的 Dockerfile 与 CI 配置。',
     },
   ];
 
   const url = chatCompletionsUrl(input.model.baseUrl!);
-  const tools = [...DEV_TOOL_DEFINITIONS, REQUEST_HUMAN_HELP_TOOL];
   let finalText = '';
   let humanBlocked = false;
 
@@ -99,7 +102,7 @@ export async function runDevAgentOpenAI(input: {
       body: JSON.stringify({
         model: input.model.model,
         messages,
-        tools,
+        tools: OPS_TOOLS,
         tool_choice: 'auto',
         temperature: 0.2,
       }),
@@ -108,13 +111,13 @@ export async function runDevAgentOpenAI(input: {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`Dev LLM failed (${res.status}): ${body.slice(0, 800)}`);
+      throw new Error(`Ops LLM failed (${res.status}): ${body.slice(0, 800)}`);
     }
 
     const data = (await res.json()) as ChatCompletionResponse;
     const assistant = data.choices?.[0]?.message;
     if (!assistant) {
-      throw new Error('Dev LLM returned empty choice');
+      throw new Error('Ops LLM returned empty choice');
     }
 
     const toolCalls = assistant.tool_calls ?? [];
@@ -125,7 +128,7 @@ export async function runDevAgentOpenAI(input: {
     });
 
     if (toolCalls.length === 0) {
-      finalText = assistant.content?.trim() ?? '开发完成';
+      finalText = assistant.content?.trim() ?? '部署准备完成';
       break;
     }
 
@@ -138,34 +141,31 @@ export async function runDevAgentOpenAI(input: {
           ? String(args.assignee_user_id)
           : undefined;
         const skillsHint = args.skills_hint ? String(args.skills_hint) : undefined;
-        const kind = String(args.kind ?? 'human_fix');
-        const reason = String(args.reason ?? '');
-        const question = args.question ? String(args.question) : undefined;
         await input.api.requestHumanHelp(input.loopId, {
-          requestedBy: 'dev-agent',
-          kind,
-          reason,
-          question,
+          requestedBy: 'ops-agent',
+          kind: String(args.kind ?? 'human_fix'),
+          reason: String(args.reason ?? ''),
+          question: args.question ? String(args.question) : undefined,
           assigneeUserId,
           skillsHint,
         });
         humanBlocked = true;
-        finalText = `已请求人工协助：${reason}`;
+        finalText = `已请求人工协助：${args.reason ?? ''}`;
         break;
       }
 
-      const progress = toolProgressMessage(name, args);
-      await input.api.postAgentMessage(
-        input.loopId,
-        { type: progress.type, body: progress.body },
-        input.phase,
-        `tool:${name}`,
-      );
-      await input.api.postAudit(input.loopId, {
-        agent: 'dev-agent',
-        action: `tool:${name}`,
-        detail: { input: args },
-      });
+      if (name === 'bash') {
+        const cmd = String(args.command ?? '');
+        if (/prod(uction)?/i.test(cmd) && !process.env.OPS_ALLOW_PROD) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: 'Error: Production deploy requires Human approval (OPS_ALLOW_PROD)',
+          });
+          continue;
+        }
+        await input.api.postAudit(input.loopId, 'bash', { command: cmd });
+      }
 
       let result;
       try {
@@ -185,20 +185,33 @@ export async function runDevAgentOpenAI(input: {
     if (humanBlocked) break;
 
     if (turn === maxTurns() - 1) {
-      finalText = assistant.content?.trim() || '已达到最大工具轮次，请检查工作区改动。';
+      finalText = assistant.content?.trim() || '已达到最大工具轮次。';
     }
+  }
+
+  if (!humanBlocked) {
+    const stagingMatch = finalText.match(/https?:\/\/[^\s]+/);
+    const loop = await input.api.getLoop(input.loopId);
+    const deployment = {
+      ...loop.context.deployment,
+      stagingUrl: stagingMatch?.[0] ?? loop.context.deployment?.stagingUrl,
+      status: 'staging' as const,
+    };
+    await input.api.updateContext(input.loopId, {
+      ...loop.context,
+      deployment,
+    });
   }
 
   await input.api.postAgentMessage(
     input.loopId,
     {
-      type: 'text',
-      body: finalText || '开发完成',
+      type: humanBlocked ? 'text' : 'artifact',
+      body: finalText || '部署准备完成',
       actions: humanBlocked
         ? undefined
-        : [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' }],
+        : [{ id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' }],
     },
     input.phase,
-    humanBlocked ? 'blocked' : 'result',
   );
 }

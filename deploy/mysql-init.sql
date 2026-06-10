@@ -39,12 +39,27 @@ CREATE TABLE IF NOT EXISTS loops (
   workspace_path  TEXT         NULL,
   context         JSON         NOT NULL,
   model_overrides JSON         NULL,
+  blocker         JSON         NULL,
   created_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   KEY idx_loops_project_id (project_id),
   KEY idx_loops_phase (phase),
   CONSTRAINT fk_loops_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- loop_members（per-Loop 成员；bio 空 = 万能接应）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS loop_members (
+  loop_id       CHAR(36)     NOT NULL,
+  user_id       VARCHAR(255) NOT NULL,
+  display_name  VARCHAR(64)  NOT NULL,
+  bio           TEXT         NOT NULL,
+  joined_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (loop_id, user_id),
+  KEY idx_loop_members_loop (loop_id),
+  CONSTRAINT fk_loop_members_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { LoopContext, LoopStatus, Phase } from '@loop/shared';
+import type { LoopBlocker, LoopContext, LoopStatus, Phase } from '@loop/shared';
 import { dbQuery, dbQueryOne, insertReturning, parseJsonField, updateReturning } from '../query.js';
 import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
@@ -13,6 +13,7 @@ export interface LoopRow {
   workspace_path: string | null;
   context: LoopContext;
   model_overrides: Record<string, unknown> | null;
+  blocker: LoopBlocker | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -24,6 +25,7 @@ function mapRow(row: LoopRow): LoopRow {
     model_overrides: row.model_overrides
       ? parseJsonField(row.model_overrides, {})
       : null,
+    blocker: row.blocker ? parseJsonField(row.blocker, null as unknown as LoopBlocker) : null,
   };
 }
 
@@ -108,6 +110,30 @@ export class LoopRepository {
       [JSON.stringify(context)],
     );
     return mapRow(row);
+  }
+
+  async updateBlocker(
+    id: string,
+    blocker: LoopBlocker | null,
+    status: LoopStatus,
+  ): Promise<LoopRow> {
+    const row = await updateReturning<LoopRow>(
+      this.pool,
+      'loops',
+      'blocker = ?, status = ?, updated_at = NOW(3)',
+      id,
+      [blocker ? JSON.stringify(blocker) : null, status],
+    );
+    return mapRow(row);
+  }
+
+  async listByStatus(status: LoopStatus): Promise<LoopRow[]> {
+    const rows = await dbQuery<LoopRow>(
+      this.pool,
+      'SELECT * FROM loops WHERE status = ? ORDER BY updated_at DESC',
+      [status],
+    );
+    return rows.map(mapRow);
   }
 
   async listByProject(projectId: string): Promise<LoopRow[]> {

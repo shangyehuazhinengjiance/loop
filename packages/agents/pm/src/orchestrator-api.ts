@@ -42,6 +42,36 @@ export class OrchestratorApi {
     return res.json();
   }
 
+  async requestHumanHelp(
+    loopId: string,
+    body: {
+      requestedBy: 'pm-agent';
+      kind: string;
+      reason: string;
+      question?: string;
+      assigneeUserId?: string;
+      skillsHint?: string;
+    },
+  ) {
+    const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/agent/blocker`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestedBy: body.requestedBy,
+        kind: body.kind,
+        reason: body.reason,
+        question: body.question,
+        assigneeUserId: body.assigneeUserId,
+        skillsHint: body.skillsHint,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`requestHumanHelp: ${res.status} ${text.slice(0, 300)}`);
+    }
+    return res.json();
+  }
+
   async updateContext(loopId: string, context: LoopContext) {
     const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/context`, {
       method: 'PATCH',
@@ -70,6 +100,8 @@ export function parsePrdAndTasks(text: string): {
         title: t.title,
         description: t.description ?? '',
         status: t.status ?? 'pending',
+        assigneeUserId: t.assigneeUserId,
+        assigneeDisplayName: t.assigneeDisplayName,
       }));
     } catch {
       tasks = [];
