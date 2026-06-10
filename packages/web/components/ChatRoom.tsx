@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadUserIdentity, type UserIdentity } from '../lib/user-identity';
 import { ChatInput } from './ChatInput';
+import { MarkdownContent } from './MarkdownContent';
 import { UserIdentityPrompt } from './UserIdentityPrompt';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
@@ -255,10 +256,9 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                   m.sender.id === user.userId
                     ? '1px solid #388bfd66'
                     : '1px solid #30363d',
-                whiteSpace: 'pre-wrap',
               }}
             >
-              {m.content.body}
+              <MarkdownContent content={m.content.body} />
             </div>
             {m.content.actions?.map((a) => (
               <button

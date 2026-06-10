@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { MarkdownContent } from '../../../../components/MarkdownContent';
 import { useEffect, useState } from 'react';
 
 const ORCHESTRATOR =
@@ -96,7 +97,9 @@ export default function ReplayPage({
               <div style={{ fontSize: 12, color: '#8b949e' }}>
                 {m.sender.displayName} · {m.phase}
               </div>
-              <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{m.content.body}</div>
+              <div style={{ marginTop: 4 }}>
+                <MarkdownContent content={m.content.body} />
+              </div>
             </div>
           ))}
         </>
