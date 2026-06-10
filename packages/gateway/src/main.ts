@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { LoopMessage } from '@loop/shared';
 import { OrchestratorClient } from './orchestrator-client.js';
+import { subscribeSse } from './sse-client.js';
 
 dotenv.config({
   path: join(dirname(fileURLToPath(import.meta.url)), '../../../.env'),
@@ -18,6 +19,10 @@ const client = new OrchestratorClient(ORCHESTRATOR_URL);
 
 /** loopId → 连接的 WebSocket 客户端 */
 const rooms = new Map<string, Set<WebSocket>>();
+
+/** loopId → SSE 取消订阅；同一 loop 共享一条 SSE 连接 */
+const loopSseUnsub = new Map<string, () => void>();
+const loopSseRefCount = new Map<string, number>();
 
 function parseLoopId(url: string | undefined): string | null {
   if (!url) return null;
@@ -33,6 +38,45 @@ function broadcast(loopId: string, payload: unknown) {
     if (ws.readyState === ws.OPEN) {
       ws.send(data);
     }
+  }
+}
+
+function ensureLoopSse(loopId: string): void {
+  const refs = (loopSseRefCount.get(loopId) ?? 0) + 1;
+  loopSseRefCount.set(loopId, refs);
+  if (loopSseUnsub.has(loopId)) return;
+
+  const url = `${ORCHESTRATOR_URL}/api/loops/${loopId}/events`;
+  const unsub = subscribeSse(
+    url,
+    (data) => {
+      try {
+        const payload = JSON.parse(data) as {
+          type: string;
+          message?: LoopMessage;
+        };
+        if (payload.type === 'message' && payload.message) {
+          broadcast(loopId, payload);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    },
+    (err) => {
+      console.error(`[gateway] SSE loop=${loopId}:`, err.message);
+    },
+  );
+  loopSseUnsub.set(loopId, unsub);
+}
+
+function releaseLoopSse(loopId: string): void {
+  const refs = (loopSseRefCount.get(loopId) ?? 1) - 1;
+  if (refs <= 0) {
+    loopSseRefCount.delete(loopId);
+    loopSseUnsub.get(loopId)?.();
+    loopSseUnsub.delete(loopId);
+  } else {
+    loopSseRefCount.set(loopId, refs);
   }
 }
 
@@ -60,28 +104,10 @@ wss.on('connection', async (ws, req: IncomingMessage) => {
   }
   rooms.get(loopId)!.add(ws);
 
-  const subscribeOrchestratorEvents = () => {
-    const es = new EventSource(
-      `${ORCHESTRATOR_URL}/api/loops/${loopId}/events`,
-    );
-    es.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data) as { type: string; message?: LoopMessage };
-        if (payload.type === 'message' && payload.message) {
-          broadcast(loopId, payload);
-        }
-      } catch {
-        // ignore malformed events
-      }
-    };
-    es.onerror = () => es.close();
-    ws.on('close', () => es.close());
-  };
-
   try {
     const history = await client.getMessages(loopId);
     ws.send(JSON.stringify({ type: 'history', messages: history }));
-    subscribeOrchestratorEvents();
+    ensureLoopSse(loopId);
   } catch (err) {
     ws.send(
       JSON.stringify({
@@ -109,7 +135,6 @@ wss.on('connection', async (ws, req: IncomingMessage) => {
           parsed.displayName,
           parsed.mentions,
         );
-        // 广播由 Orchestrator SSE → subscribeOrchestratorEvents 转发
       }
     } catch (err) {
       ws.send(
@@ -126,6 +151,7 @@ wss.on('connection', async (ws, req: IncomingMessage) => {
     if (rooms.get(loopId)?.size === 0) {
       rooms.delete(loopId);
     }
+    releaseLoopSse(loopId);
   });
 });
 
