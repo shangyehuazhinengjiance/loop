@@ -21,10 +21,10 @@ data:
   PM_MODEL_BASE_URL: "https://api.anthropic.com"
   PM_MODEL_NAME: "claude-sonnet-4-20250514"
 
-  # Dev 模型
-  DEV_MODEL_BASE_URL: "https://api.anthropic.com"
-  DEV_MODEL_NAME: "claude-sonnet-4-20250514"
-  DEV_MODEL_FAST: "claude-3-5-haiku-20241022"
+  # Dev 模型（OpenAI 兼容 API）
+  DEV_MODEL_BASE_URL: "https://api.360.cn"
+  DEV_MODEL_NAME: "google/gemini-2.5-pro"
+  DEV_AGENT_RUNTIME: "client-sdk"
 
   # Ops 模型
   OPS_MODEL_BASE_URL: "https://api.anthropic.com"

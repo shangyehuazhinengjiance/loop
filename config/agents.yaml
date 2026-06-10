@@ -11,12 +11,13 @@ agents:
     max_tokens: 8192
 
   dev:
-    provider: anthropic-compatible
+    provider: openai-compatible
     base_url: ${DEV_MODEL_BASE_URL}
     model: ${DEV_MODEL_NAME}
     fast_model: ${DEV_MODEL_FAST}
     api_key_env: DEV_MODEL_API_KEY
-    runtime: agent-sdk
+    # client-sdk = OpenAI 兼容 API + 内置工具循环；agent-sdk = Claude Code（仅 Claude 模型）
+    runtime: client-sdk
     permission_mode: acceptEdits
 
   ops:

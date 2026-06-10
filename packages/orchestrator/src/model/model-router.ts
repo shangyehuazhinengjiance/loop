@@ -104,9 +104,19 @@ export class ModelRouter {
       process.env.LITELLM_API_KEY ??
       '';
 
-    const runtime =
+    let runtime =
       defaults.runtime ??
       (agent === 'pm' ? 'client-sdk' : 'agent-sdk');
+
+    if (agent === 'dev') {
+      const devRuntime = process.env.DEV_AGENT_RUNTIME?.trim();
+      if (devRuntime === 'client-sdk' || devRuntime === 'agent-sdk') {
+        runtime = devRuntime;
+      } else if (!defaults.runtime || defaults.runtime === 'agent-sdk') {
+        // 默认 OpenAI 兼容模式，避免强依赖 Claude Code
+        runtime = 'client-sdk';
+      }
+    }
 
     const extra: Record<string, string> = {};
     if (baseUrl) extra.ANTHROPIC_BASE_URL = baseUrl;

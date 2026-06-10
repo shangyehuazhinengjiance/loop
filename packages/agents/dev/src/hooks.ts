@@ -1,7 +1,5 @@
 import type { OrchestratorApi } from './orchestrator-api.js';
-
-const BLOCKED_BASH = [/rm\s+-rf\s+\//, /mkfs/, /curl\s+.*\|\s*sh/];
-const SENSITIVE_FILES = [/\.env$/, /id_rsa$/, /\.pem$/];
+import { BLOCKED_BASH, SENSITIVE_FILES } from './security.js';
 
 function bashCommand(input: unknown): string {
   const toolInput = (input as { tool_input?: { command?: string } }).tool_input;

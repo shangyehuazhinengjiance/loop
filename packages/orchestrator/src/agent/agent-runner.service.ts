@@ -102,7 +102,7 @@ export class AgentRunnerService implements OnModuleInit {
         throw new Error('DEV_MODEL_API_KEY 未配置，Dev Agent 无法启动');
       }
       console.info(
-        `[agent-runner] dev start loop=${loopId} cwd=${workspacePath} model=${model.model}`,
+        `[agent-runner] dev start loop=${loopId} runtime=${model.runtime} cwd=${workspacePath} model=${model.model}`,
       );
       await runDevAgent({
         ...common,
