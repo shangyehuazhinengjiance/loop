@@ -28,7 +28,10 @@ RUN npm run build -w @loop/shared \
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
 
-RUN apk add --no-cache git openssh-client ca-certificates
+# Claude Agent SDK 的 Bash 工具需要 POSIX shell（Alpine 默认仅 sh）
+RUN apk add --no-cache git openssh-client ca-certificates bash
+
+ENV SHELL=/bin/bash
 
 WORKDIR /app
 

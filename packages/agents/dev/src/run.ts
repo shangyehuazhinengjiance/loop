@@ -1,6 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ResolvedModelConfig } from '@loop/shared';
-import { mkdir } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { buildDevPrompt } from './prompts.js';
 import { createDevHooks, DEV_SUBAGENTS } from './hooks.js';
 import { OrchestratorApi } from './orchestrator-api.js';
@@ -69,6 +70,46 @@ function mapSdkMessageToChat(
   return null;
 }
 
+function wrapDevAgentStartError(
+  err: unknown,
+  ctx: { workspacePath: string; debugFile?: string },
+): Error {
+  const base = err instanceof Error ? err.message : String(err);
+  const hints = [
+    'Claude Agent SDK 子进程启动失败，常见原因：',
+    '1) DEV_MODEL_API_KEY 无效或未配置',
+    '2) 容器缺少 bash（镜像需安装 bash 并设置 SHELL=/bin/bash）',
+    '3) 工作区路径无效或为空',
+    '4) 以 root 运行容器（可尝试 securityContext.runAsUser）',
+    ctx.debugFile ? `5) 查看调试日志: ${ctx.debugFile}` : '5) 设置 DEV_AGENT_DEBUG=true 获取详细日志',
+  ];
+  return new Error(`${base}\n工作区: ${ctx.workspacePath}\n${hints.join('\n')}`);
+}
+
+async function assertDevPrerequisites(
+  workspacePath: string,
+  model: ResolvedModelConfig,
+): Promise<void> {
+  if (!model.apiKey?.trim()) {
+    throw new Error('DEV_MODEL_API_KEY 未配置或为空');
+  }
+  try {
+    await access(workspacePath);
+  } catch {
+    throw new Error(`工作区不存在: ${workspacePath}`);
+  }
+}
+
+function devPermissionMode(): 'acceptEdits' | 'default' {
+  const override = process.env.DEV_PERMISSION_MODE?.trim();
+  if (override === 'default' || override === 'acceptEdits') return override;
+  // 容器内 acceptEdits 偶发失败，默认用 default（工具仍可通过 hooks 审批）
+  if (process.env.KUBERNETES_SERVICE_HOST || process.env.SANDBOX_MODE === 'docker') {
+    return 'default';
+  }
+  return 'acceptEdits';
+}
+
 export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
   if (input.signal?.aborted) return;
 
@@ -76,11 +117,15 @@ export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
   const loop = await api.getLoop(input.loopId);
 
   await mkdir(input.workspacePath, { recursive: true });
+  await assertDevPrerequisites(input.workspacePath, input.model);
 
   const prompt = buildDevPrompt(loop.context, loop.title);
   let sessionId: string | undefined = loop.context.devSessionId;
 
-  const env: Record<string, string> = { ...input.model.extra };
+  const env: Record<string, string> = {
+    ...input.model.extra,
+    SHELL: process.env.SHELL ?? '/bin/bash',
+  };
   if (input.model.apiKey) env.ANTHROPIC_API_KEY = input.model.apiKey;
   if (input.sandboxMode === 'docker') {
     env.SANDBOX_MODE = 'docker';
@@ -92,41 +137,58 @@ export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
     workspacePath: input.workspacePath,
   });
 
-  for await (const message of query({
-    prompt,
-    options: {
-      model: input.model.model,
-      cwd: input.workspacePath,
-      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent'],
-      permissionMode: 'acceptEdits',
-      resume: sessionId,
-      env,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hooks: hooks as any,
-      agents: DEV_SUBAGENTS,
-    },
-  })) {
-    if (input.signal?.aborted) break;
+  const debugEnabled = process.env.DEV_AGENT_DEBUG === 'true';
+  const debugFile = debugEnabled
+    ? join('/tmp', `claude-dev-${input.loopId}.log`)
+    : undefined;
 
-    const mapped = mapSdkMessageToChat(
-      message as { type: string; [key: string]: unknown },
-    );
-    if (mapped) {
-      const actions =
-        mapped.sdkMessageType === 'result'
-          ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' as const }]
-          : undefined;
+  let stream;
+  try {
+    stream = query({
+      prompt,
+      options: {
+        model: input.model.model,
+        cwd: input.workspacePath,
+        allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent'],
+        permissionMode: devPermissionMode(),
+        resume: sessionId,
+        env,
+        ...(debugEnabled ? { debug: true, debugFile } : {}),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        hooks: hooks as any,
+        agents: DEV_SUBAGENTS,
+      },
+    });
+  } catch (err) {
+    throw wrapDevAgentStartError(err, { workspacePath: input.workspacePath, debugFile });
+  }
 
-      await api.postAgentMessage(
-        input.loopId,
-        { type: mapped.type, body: mapped.body, actions },
-        loop.phase,
-        mapped.sdkMessageType,
+  try {
+    for await (const message of stream) {
+      if (input.signal?.aborted) break;
+
+      const mapped = mapSdkMessageToChat(
+        message as { type: string; [key: string]: unknown },
       );
-    }
+      if (mapped) {
+        const actions =
+          mapped.sdkMessageType === 'result'
+            ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' as const }]
+            : undefined;
 
-    const msg = message as { type: string; session_id?: string };
-    if (msg.session_id) sessionId = msg.session_id;
+        await api.postAgentMessage(
+          input.loopId,
+          { type: mapped.type, body: mapped.body, actions },
+          loop.phase,
+          mapped.sdkMessageType,
+        );
+      }
+
+      const msg = message as { type: string; session_id?: string };
+      if (msg.session_id) sessionId = msg.session_id;
+    }
+  } catch (err) {
+    throw wrapDevAgentStartError(err, { workspacePath: input.workspacePath, debugFile });
   }
 
   if (sessionId && sessionId !== loop.context.devSessionId) {
