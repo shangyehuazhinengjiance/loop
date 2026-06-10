@@ -25,9 +25,10 @@ async function migrate(): Promise<void> {
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
-      version VARCHAR(255) PRIMARY KEY,
-      applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-    )
+      version VARCHAR(255) NOT NULL,
+      applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      PRIMARY KEY (version)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   const appliedRows = await dbQuery<{ version: string }>(
