@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Native Loop — Orchestrator 镜像
 # =============================================================================
-# 【推荐】使用预装依赖的基础镜像（见 docker/base/README.md）：
+# 【推荐】使用预装依赖的基础镜像（见 deploy/DOCKER.md）：
 #
 #   docker build -f Dockerfile \
 #     --build-arg BASE_REGISTRY=harbor.qihoo.net/ai-native \

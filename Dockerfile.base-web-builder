@@ -1,11 +1,8 @@
 # =============================================================================
 # 基础镜像 4/4：loop-base-web-builder
 # =============================================================================
-# 含 Next.js 构建依赖（packages/web 独立安装，体积较大）。
-# Web 运行阶段使用 standalone 产物，无需单独 runtime 基础镜像。
-#
-# 构建（仓库根目录）：
-#   docker build -f docker/base/Dockerfile.web-builder \
+#   docker build --platform linux/amd64 \
+#     -f Dockerfile.base-web-builder \
 #     -t $REGISTRY/loop-base-web-builder:$TAG .
 # =============================================================================
 

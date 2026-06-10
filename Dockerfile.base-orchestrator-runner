@@ -1,10 +1,8 @@
 # =============================================================================
 # 基础镜像 2/4：loop-base-orchestrator-runner
 # =============================================================================
-# 含 orchestrator 运行时生产依赖 + git/bash（Dev Agent 需要）。
-#
-# 构建（仓库根目录）：
-#   docker build -f docker/base/Dockerfile.orchestrator-runner \
+#   docker build --platform linux/amd64 \
+#     -f Dockerfile.base-orchestrator-runner \
 #     -t $REGISTRY/loop-base-orchestrator-runner:$TAG .
 # =============================================================================
 

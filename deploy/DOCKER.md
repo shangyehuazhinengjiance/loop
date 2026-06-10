@@ -13,18 +13,27 @@
 | `loop-gateway` | **`Dockerfile.gateway`** | 3001 | WebSocket 群聊 |
 | `loop-web` | **`Dockerfile.web`** | 3002 | Next.js 前端 |
 
-### 基础镜像（依赖预装，共 4 个）
+### 基础镜像（依赖预装，共 4 个，Dockerfile 在仓库根目录）
 
-详见 **[docker/base/README.md](../docker/base/README.md)**。
+与业务镜像相同：**context 均为 `.`**，公司流水线只需改 Dockerfile 文件名。
 
-| 镜像 | 说明 |
-|------|------|
-| `loop-base-monorepo-builder` | monorepo `npm ci`，orchestrator/gateway **编译** |
-| `loop-base-orchestrator-runner` | orchestrator **运行**依赖 + git/bash |
-| `loop-base-gateway-runner` | gateway **运行**依赖 |
-| `loop-base-web-builder` | Next.js **编译**依赖 |
+| 镜像 | Dockerfile（仓库根） | 说明 |
+|------|----------------------|------|
+| `loop-base-monorepo-builder` | **`Dockerfile.base-monorepo-builder`** | monorepo `npm ci`，orchestrator/gateway 编译 |
+| `loop-base-orchestrator-runner` | **`Dockerfile.base-orchestrator-runner`** | orchestrator 运行依赖 + git/bash |
+| `loop-base-gateway-runner` | **`Dockerfile.base-gateway-runner`** | gateway 运行依赖 |
+| `loop-base-web-builder` | **`Dockerfile.base-web-builder`** | Next.js 编译依赖 |
 
-`package-lock.json` 变更时执行 `./scripts/build-base-images.sh` 重建；日常只构建业务镜像并传入 `BASE_REGISTRY` / `BASE_TAG`。
+```bash
+# 示例（与 Dockerfile 业务构建相同，仅 -f 不同）
+docker build --platform linux/amd64 \
+  -f Dockerfile.base-monorepo-builder \
+  -t $REGISTRY/loop-base-monorepo-builder:$TAG .
+
+./scripts/build-base-images.sh   # 一次构建并 push 四个基础镜像
+```
+
+`package-lock.json` 变更时重建基础镜像；日常业务构建传入 `BASE_REGISTRY` / `BASE_TAG` 即可。
 
 > 备选：`packages/orchestrator/Dockerfile` 内容与根目录 `Dockerfile` 相同，但 **context 仍必须是 `.`**
 

@@ -1,10 +1,8 @@
 # =============================================================================
 # 基础镜像 3/4：loop-base-gateway-runner
 # =============================================================================
-# 含 gateway 运行时生产依赖。
-#
-# 构建（仓库根目录）：
-#   docker build -f docker/base/Dockerfile.gateway-runner \
+#   docker build --platform linux/amd64 \
+#     -f Dockerfile.base-gateway-runner \
 #     -t $REGISTRY/loop-base-gateway-runner:$TAG .
 # =============================================================================
 
