@@ -40,19 +40,16 @@ COPY failed: stat packages/shared/package.json: file does not exist
 sh 'docker build -f Dockerfile -t $IMAGE .'
 ```
 
-Jenkins / GitLab CI 示例：
+Jenkins / GitHub Actions 示例：
 
 ```groovy
-// Jenkins
-dir('loop') {
-  sh 'docker build -f packages/orchestrator/Dockerfile -t $IMAGE .'
-}
+// Jenkins（Git 源：GitHub）
+// Job 配置 Repository URL: https://github.com/shangyehuazhinengjiance/loop.git
+sh 'docker build -f Dockerfile -t $IMAGE .'
 ```
 
 ```yaml
-# GitLab CI
-script:
-  - docker build -f packages/orchestrator/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+# GitHub Actions — 见 .github/workflows/docker-build.yml
 ```
 
 ## 本地构建（在仓库根目录执行）

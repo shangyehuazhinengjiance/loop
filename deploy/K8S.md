@@ -1,5 +1,6 @@
 # Kubernetes 部署指南
 
+> **代码仓库**：https://github.com/shangyehuazhinengjiance/loop  
 > 前置条件：三个镜像已构建并推送到公司镜像仓库  
 > `loop-orchestrator` / `loop-gateway` / `loop-web`  
 > PostgreSQL 使用公司托管实例（集群外）

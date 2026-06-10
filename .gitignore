@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 deploy/k8s/secret.yaml
+scripts/sync.env
 workspaces/
 *.log
 .DS_Store

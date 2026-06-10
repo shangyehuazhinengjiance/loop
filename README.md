@@ -2,6 +2,8 @@
 
 以群聊为交互形式的 AI 协作平台：人类与 PM / Dev / Ops Agent 共同完成需求 → 开发 → 发布的完整 Loop。
 
+**代码仓库**：https://github.com/shangyehuazhinengjiance/loop
+
 详细设计见 [DESIGN.md](./DESIGN.md)。
 
 ## 功能概览
@@ -119,7 +121,9 @@ npm run e2e
 | web | **`Dockerfile.web`** |
 
 详细构建命令、环境变量见 [deploy/DOCKER.md](./deploy/DOCKER.md)。  
-K8s Deployment 分步指南与 YAML 清单见 [deploy/K8S.md](./deploy/K8S.md)。
+K8s Deployment 分步指南见 [deploy/K8S.md](./deploy/K8S.md)。  
+GitHub 仓库与 Jenkins 拉代码说明见 [deploy/GITHUB.md](./deploy/GITHUB.md)。  
+GitHub → GitLab 定时镜像同步见 [scripts/SYNC.md](./scripts/SYNC.md)。
 
 ```bash
 docker build -f Dockerfile -t loop-orchestrator .

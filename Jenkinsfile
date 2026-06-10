@@ -1,4 +1,5 @@
 // AI Native Loop — Docker 构建示例
+// Git 源：https://github.com/shangyehuazhinengjiance/loop
 // 关键：docker build 的 context 必须是仓库根目录（最后一个参数为 .）
 
 pipeline {
