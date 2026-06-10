@@ -24,8 +24,8 @@ pipeline {
     stage('Build Orchestrator') {
       steps {
         sh '''
-          export DOCKER_BUILDKIT=1
-          docker build -f Dockerfile -t ${REGISTRY}/loop-orchestrator:${BUILD_NUMBER} .
+          # 18.09 起支持 BuildKit，但必须显式开启；变量写在同一行最稳妥
+          DOCKER_BUILDKIT=1 docker build -f Dockerfile -t ${REGISTRY}/loop-orchestrator:${BUILD_NUMBER} .
         '''
       }
     }

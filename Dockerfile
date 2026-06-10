@@ -1,26 +1,38 @@
-# syntax=docker/dockerfile:1.4
-# AI Native Loop — Orchestrator（请在仓库根目录构建）
+# =============================================================================
+# AI Native Loop — Orchestrator 镜像
+# =============================================================================
+# 【公司流水线】直接执行即可，无需 BuildKit / 无需自定义 Jenkinsfile：
 #
-#   DOCKER_BUILDKIT=1 docker build -f Dockerfile -t loop-orchestrator .
-#                                 最后一个参数必须是 .
+#   docker build -f Dockerfile -t loop-orchestrator .
+#                                              ↑ 必须是仓库根目录
 #
-# 若报错 packages/shared/package.json not found，
-# 说明 CI 的 build context 不是仓库根目录，请改 Jenkinsfile（见仓库根 Jenkinsfile）。
+# - 不使用 RUN --mount，兼容 Docker 18.09+ 标准构建
+# - 先 COPY 各 workspace 的 package.json + package-lock.json，再 npm ci，
+#   依赖未变时复用镜像层（仅改业务代码时跳过重新 npm install）
+#
+# 若报错 packages/shared/package.json not found → build context 不是仓库根目录
+# =============================================================================
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
 
 WORKDIR /app
 
-# 校验 build context（缺少则说明 context 不是仓库根目录）
-COPY packages/shared/package.json ./packages/shared/package.json
-
+# --- 依赖层（尽量保持变更少，利于 CI 层缓存）---
 COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/orchestrator/package.json ./packages/orchestrator/
+COPY packages/gateway/package.json ./packages/gateway/
+COPY packages/web/package.json ./packages/web/
+COPY packages/agents/pm/package.json ./packages/agents/pm/
+COPY packages/agents/dev/package.json ./packages/agents/dev/
+COPY packages/agents/ops/package.json ./packages/agents/ops/
+
+RUN npm ci
+
+# --- 源码层 ---
 COPY packages ./packages
 COPY config ./config
 COPY migrations ./migrations
-
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
 
 RUN npm run build -w @loop/shared \
  && npm run build -w @loop/agent-pm \
@@ -30,13 +42,10 @@ RUN npm run build -w @loop/shared \
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
 
-# Claude Agent SDK 的 Bash 工具需要 POSIX shell（Alpine 默认仅 sh）
 RUN apk add --no-cache git openssh-client ca-certificates bash
 
 ENV SHELL=/bin/bash
-
 WORKDIR /app
-
 ENV NODE_ENV=production
 ENV ORCHESTRATOR_PORT=3000
 
@@ -47,9 +56,7 @@ COPY packages/agents/pm/package.json ./packages/agents/pm/
 COPY packages/agents/dev/package.json ./packages/agents/dev/
 COPY packages/agents/ops/package.json ./packages/agents/ops/
 
-# runner 仅复制部分 workspace，使用 npm install（配合 cache mount 加速重复构建）
-RUN --mount=type=cache,target=/root/.npm \
-    npm install --omit=dev
+RUN npm install --omit=dev
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/agents/pm/dist ./packages/agents/pm/dist

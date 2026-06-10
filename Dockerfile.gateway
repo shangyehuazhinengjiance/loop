@@ -1,17 +1,24 @@
-# syntax=docker/dockerfile:1.4
-# Gateway — 仓库根目录构建: DOCKER_BUILDKIT=1 docker build -f Dockerfile.gateway -t loop-gateway .
+# =============================================================================
+# AI Native Loop — Gateway 镜像
+# =============================================================================
+# 【公司流水线】标准 docker build，无需 BuildKit：
+#
+#   docker build -f Dockerfile.gateway -t loop-gateway .
+# =============================================================================
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS builder
 
 WORKDIR /app
 
-COPY packages/shared/package.json ./packages/shared/package.json
 COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/gateway/package.json ./packages/gateway/
+
+RUN npm install
+
 COPY packages/shared ./packages/shared
 COPY packages/gateway ./packages/gateway
 
-RUN --mount=type=cache,target=/root/.npm \
-    npm install
 RUN npm run build -w @loop/shared && npm run build -w @loop/gateway
 
 FROM harbor.qihoo.net/library/node:22.16.0-alpine AS runner
@@ -26,8 +33,7 @@ COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/gateway/package.json ./packages/gateway/
 
-RUN --mount=type=cache,target=/root/.npm \
-    npm install --omit=dev
+RUN npm install --omit=dev
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/gateway/dist ./packages/gateway/dist
