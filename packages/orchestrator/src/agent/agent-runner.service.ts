@@ -1,4 +1,11 @@
-import { formatMemberRoster, type AgentRole, type Phase } from '@loop/shared';
+import {
+  buildAgentFailureMessage,
+  failureMentions,
+  formatMemberRoster,
+  pickNotifyMember,
+  type AgentRole,
+  type Phase,
+} from '@loop/shared';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { join } from 'node:path';
 import { runDevAgent } from '@loop/agent-dev';
@@ -56,30 +63,79 @@ export class AgentRunnerService implements OnModuleInit {
         console.info(`[agent-runner] skip ${key}: loop is blocked`);
         return;
       }
-      await this.runAgent(event.loopId, event.agent, loop?.phase ?? 'requirement', abort.signal);
+      await this.runAgent(
+        event.loopId,
+        event.agent,
+        loop?.phase ?? 'requirement',
+        abort.signal,
+        event,
+      );
     } catch (err) {
       if (abort.signal.aborted) return;
       console.error(`[agent-runner] ${key} failed`, err);
       const loop = await this.loopRepo.findById(event.loopId);
-      const detail =
-        err instanceof Error ? err.message : String(err);
-      const runtimeHint =
-        event.agent === 'dev'
-          ? '\n\n排查：在 Pod 执行 `echo $DEV_AGENT_RUNTIME`（应为 client-sdk）；`kubectl logs` 中应有 `runtime=client-sdk`。若仍是 agent-sdk，请重建 orchestrator 镜像并 rollout。'
-          : '';
-      await this.chatService.publishAgentMessage({
-        loopId: event.loopId,
-        phase: loop?.phase ?? 'requirement',
-        agentId: `${event.agent}-agent`,
-        content: {
-          type: 'text',
-          body: `Agent 执行失败: ${detail}${runtimeHint}`,
-        },
-      });
+      await this.notifyAgentFailure(event, loop?.phase ?? 'requirement', err);
     } finally {
       this.running.delete(key);
       this.abortControllers.delete(key);
     }
+  }
+
+  private agentLabel(agent: AgentRole): string {
+    if (agent === 'pm') return 'PM Agent';
+    if (agent === 'dev') return 'Dev Agent';
+    return 'Ops Agent';
+  }
+
+  private async notifyAgentFailure(
+    event: AgentActivateEvent,
+    phase: Phase,
+    err: unknown,
+  ): Promise<void> {
+    const members = await this.memberService.list(event.loopId);
+    const skillsHint =
+      event.agent === 'pm'
+        ? '产品 PM 配置'
+        : event.agent === 'dev'
+          ? '开发 代码'
+          : '运维 K8s 部署';
+    const member = pickNotifyMember(members, {
+      preferUserId: event.userId,
+      skillsHint,
+    });
+    const detail = err instanceof Error ? err.message : String(err);
+    const hints =
+      event.agent === 'dev'
+        ? [
+            'Pod 内：`echo $DEV_AGENT_RUNTIME`（非 Claude 应为 client-sdk）',
+            '日志：`kubectl logs deploy/orchestrator | grep dev-agent`',
+          ]
+        : event.agent === 'pm'
+          ? [
+              'Pod 内：`echo $PM_AGENT_RUNTIME $PM_MODEL_BASE_URL $PM_MODEL_NAME`',
+              '非 Claude 模型需 PM_AGENT_RUNTIME=client-sdk',
+              '可设 PM_AGENT_DEBUG=true 查看失败时的模型响应摘要',
+            ]
+          : [
+              'Pod 内：`echo $OPS_AGENT_RUNTIME $OPS_MODEL_BASE_URL`',
+              '非 Claude 模型需 OPS_AGENT_RUNTIME=client-sdk',
+            ];
+
+    await this.chatService.publishAgentMessage({
+      loopId: event.loopId,
+      phase,
+      agentId: `${event.agent}-agent`,
+      content: {
+        type: 'text',
+        body: buildAgentFailureMessage({
+          agentLabel: this.agentLabel(event.agent),
+          reason: detail,
+          member,
+          hints,
+        }),
+        mentions: failureMentions(member),
+      },
+    });
   }
 
   private async runAgent(
@@ -87,6 +143,7 @@ export class AgentRunnerService implements OnModuleInit {
     agent: AgentRole,
     phase: Phase,
     signal: AbortSignal,
+    event: AgentActivateEvent,
   ): Promise<void> {
     const loop = await this.loopRepo.findById(loopId);
     if (!loop) return;
@@ -108,9 +165,20 @@ export class AgentRunnerService implements OnModuleInit {
 
     const members = await this.memberService.list(loopId);
     const memberRoster = formatMemberRoster(members);
-    const common = { loopId, orchestratorUrl, model, signal, memberRoster };
+    const common = {
+      loopId,
+      orchestratorUrl,
+      model,
+      signal,
+      memberRoster,
+      members,
+      triggeredByUserId: event.userId,
+    };
 
     if (agent === 'pm') {
+      console.info(
+        `[agent-runner] pm start loop=${loopId} runtime=${model.runtime} model=${model.model}`,
+      );
       await runPmAgent(common);
       return;
     }
@@ -133,6 +201,9 @@ export class AgentRunnerService implements OnModuleInit {
     }
 
     if (agent === 'ops') {
+      console.info(
+        `[agent-runner] ops start loop=${loopId} runtime=${model.runtime} model=${model.model}`,
+      );
       await runOpsAgent({
         ...common,
         workspacePath,

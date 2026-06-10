@@ -108,6 +108,16 @@ export class ModelRouter {
       defaults.runtime ??
       (agent === 'pm' ? 'client-sdk' : 'agent-sdk');
 
+    if (agent === 'pm') {
+      const pmRuntime = process.env.PM_AGENT_RUNTIME?.trim();
+      if (pmRuntime === 'client-sdk' || pmRuntime === 'agent-sdk') {
+        runtime = pmRuntime;
+      }
+      if (!merged.model.toLowerCase().includes('claude')) {
+        runtime = 'client-sdk';
+      }
+    }
+
     if (agent === 'dev') {
       const devRuntime = process.env.DEV_AGENT_RUNTIME?.trim();
       if (devRuntime === 'client-sdk' || devRuntime === 'agent-sdk') {
