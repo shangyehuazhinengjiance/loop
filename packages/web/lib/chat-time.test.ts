@@ -14,10 +14,12 @@ describe('chat-time UTC+8', () => {
     );
   });
 
-  it('formatBubbleTimestamp shows HH:mm for same UTC+8 day', () => {
-    const iso = '2026-06-09T01:30:45.000Z';
-    const result = formatBubbleTimestamp(iso);
-    assert.match(result, /09:30/);
+  it('formatBubbleTimestamp includes seconds', () => {
+    const a = formatBubbleTimestamp('2026-06-09T01:30:45.000Z');
+    const b = formatBubbleTimestamp('2026-06-09T01:30:52.000Z');
+    assert.match(a, /09:30:45/);
+    assert.match(b, /09:30:52/);
+    assert.notEqual(a, b);
   });
 
   it('formatChatTimestamp includes year for old messages', () => {

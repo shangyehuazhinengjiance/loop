@@ -305,6 +305,8 @@ export interface LoopMessage {
     artifacts?: unknown[];
     mentions?: string[];
     actions?: Action[];
+    /** Agent SDK 消息类型（持久化，用于前端聚合中间过程） */
+    sdkMessageType?: string;
   };
   metadata: {
     timestamp: string;

@@ -55,6 +55,7 @@ interface Message {
     body: string;
     actions?: Action[];
     mentions?: string[];
+    sdkMessageType?: string;
   };
   phase: string;
   metadata?: { timestamp?: string; sdkMessageType?: string };

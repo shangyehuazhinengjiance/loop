@@ -67,13 +67,22 @@ export class ChatService extends EventEmitter {
     phase: LoopMessage['phase'];
     agentId: string;
     content: LoopMessage['content'];
+    sdkMessageType?: string;
   }): Promise<LoopMessage> {
+    const content: LoopMessage['content'] = {
+      ...input.content,
+      ...(input.sdkMessageType
+        ? { sdkMessageType: input.sdkMessageType }
+        : input.content.sdkMessageType
+          ? { sdkMessageType: input.content.sdkMessageType }
+          : {}),
+    };
     const row = await this.messageRepo.create({
       loopId: input.loopId,
       phase: input.phase,
       senderType: 'agent',
       senderId: input.agentId,
-      content: input.content,
+      content,
     });
 
     const message = this.messageRepo.toLoopMessage(

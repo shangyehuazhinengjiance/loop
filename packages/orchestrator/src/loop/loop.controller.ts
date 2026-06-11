@@ -469,17 +469,13 @@ export class LoopController {
     const loop = await this.loopService.getLoop(id);
     if (!loop) throw new NotFoundException('Loop not found');
 
-    const message = await this.chatService.publishAgentMessage({
+    return this.chatService.publishAgentMessage({
       loopId: id,
       phase: body.phase as Phase,
       agentId: body.agentId,
       content: body.content,
+      sdkMessageType: body.sdkMessageType,
     });
-
-    if (body.sdkMessageType) {
-      message.metadata.sdkMessageType = body.sdkMessageType;
-    }
-    return message;
   }
 
   @Get('loops/:id/artifacts')
