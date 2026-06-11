@@ -11,10 +11,10 @@ describe('PhaseStateMachine', () => {
     assert.equal(result.activateAgent, 'pm');
   });
 
-  it('approve_prd: requirement → development', () => {
+  it('approve_prd: requirement → development (dev 由用户选模式后激活)', () => {
     const result = sm.transition('requirement', 'approve_prd');
     assert.equal(result.toPhase, 'development');
-    assert.equal(result.activateAgent, 'dev');
+    assert.equal(result.activateAgent, undefined);
   });
 
   it('approve_dev: development → deployment (no auto ops agent)', () => {
@@ -45,7 +45,7 @@ describe('PhaseStateMachine', () => {
   it('rollback: deployment → development', () => {
     const result = sm.rollback('deployment', 'development');
     assert.equal(result.toPhase, 'development');
-    assert.equal(result.activateAgent, 'dev');
+    assert.equal(result.activateAgent, undefined);
   });
 
   it('rejects invalid rollback', () => {

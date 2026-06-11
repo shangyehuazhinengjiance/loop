@@ -39,8 +39,19 @@ export interface LoopMember {
 export type ApprovalActionType =
   | 'approve_prd'
   | 'approve_dev'
+  | 'confirm_mr_merged'
+  | 'confirm_master_mr_merged'
+  | 'approve_test'
+  | 'reject_test'
   | 'approve_deploy'
   | 'rollback';
+
+/** 群聊内交互按钮（含审批与开发模式选择） */
+export type LoopInteractiveAction =
+  | ApprovalActionType
+  | 'select_dev_mode_agent'
+  | 'select_dev_mode_external'
+  | 'complete_external_dev';
 
 export type TransitionTrigger =
   | 'start'
@@ -74,13 +85,104 @@ export interface Task {
   assigneeDisplayName?: string;
 }
 
+/** manual：人合并/部署；agent：Ops Agent 自动部署 */
+export type DeploymentExecutionMode = 'manual' | 'agent';
+
+export type DeploymentStep =
+  | 'awaiting_mr_merge'
+  /** @deprecated 旧流程，等同 awaiting_test_approval */
+  | 'awaiting_pipeline'
+  /** agent 模式：Ops 部署测试环境 */
+  | 'awaiting_test_deploy'
+  | 'awaiting_test_approval'
+  | 'awaiting_prod_deploy'
+  | 'awaiting_prod_approval'
+  /** manual 模式：等人部署并验证测试环境 */
+  | 'awaiting_manual_test_deploy'
+  /** manual 模式：等人合并 test → master MR */
+  | 'awaiting_master_mr_merge'
+  /** manual 模式：等人验证生产环境 */
+  | 'awaiting_manual_prod_verify';
+
+export type OpsDeployTarget = 'test' | 'production';
+
+export interface MergeRequestInfo {
+  url: string;
+  number: number;
+  headBranch: string;
+  baseBranch: string;
+  provider: 'github' | 'gitlab';
+  createdAt: string;
+}
+
 export interface DeploymentInfo {
   stagingUrl?: string;
   productionUrl?: string;
   status: 'pending' | 'staging' | 'production' | 'failed';
-  /** 部署推送目标分支（默认 test） */
+  /** manual | agent，进入 deployment 时从项目配置写入 */
+  executionMode?: DeploymentExecutionMode;
+  /** 部署目标分支（默认 test） */
   targetBranch?: string;
+  productionBranch?: string;
   commitSha?: string;
+  /** deployment 子步骤 */
+  step?: DeploymentStep;
+  /** loop → test */
+  mergeRequest?: MergeRequestInfo;
+  mergeAssigneeUserId?: string;
+  mergeAssigneeDisplayName?: string;
+  mrMergedAt?: string;
+  mrMergedBy?: string;
+  /** manual：测试环境部署/验证负责人 */
+  deployAssigneeUserId?: string;
+  deployAssigneeDisplayName?: string;
+  /** test → master */
+  masterMergeRequest?: MergeRequestInfo;
+  masterMergeAssigneeUserId?: string;
+  masterMergeAssigneeDisplayName?: string;
+  masterMrMergedAt?: string;
+  masterMrMergedBy?: string;
+  testDeployedAt?: string;
+  testApprovedAt?: string;
+  testApprovedBy?: string;
+  testRejectedAt?: string;
+  testRejectedBy?: string;
+  testApproverUserId?: string;
+  testApproverDisplayName?: string;
+  prodDeployedAt?: string;
+}
+
+export type DevelopmentMode = 'agent' | 'external';
+
+export interface ExternalDevelopmentInfo {
+  assigneeUserId: string;
+  assigneeDisplayName: string;
+  prdCommitSha?: string;
+  prdPushedAt?: string;
+  handoffAt?: string;
+  completedAt?: string;
+  completedBy?: string;
+  targetBranch: string;
+}
+
+/** 创建 Loop 时由产品同学粘贴的外部需求（PM 首轮先熟悉，再整理为正式 PRD） */
+export interface InputRequirementsDocument {
+  title: string;
+  content: string;
+  source: 'create_form';
+  savedAt: string;
+  /** 工作区内相对路径，如 docs/loop/{id}/INPUT_REQUIREMENTS.md */
+  gitPath: string;
+  commitSha?: string;
+}
+
+/** development 阶段子状态（顶层 phase 仍为 development） */
+export interface DevelopmentConfig {
+  /** 未设置 = 等待 PRD 确认人选择开发模式 */
+  mode?: DevelopmentMode;
+  /** 确认 PRD 的成员 userId，仅此用户可选择开发模式 */
+  prdApprovedBy?: string;
+  external?: ExternalDevelopmentInfo;
 }
 
 export interface LoopContext {
@@ -90,6 +192,9 @@ export interface LoopContext {
   devSessionId?: string;
   opsSessionId?: string;
   deployment?: DeploymentInfo;
+  development?: DevelopmentConfig;
+  /** 创建时导入的外部需求文档（已写入 Git 工作区） */
+  inputRequirements?: InputRequirementsDocument;
 }
 
 export interface LoopGitConfig {
@@ -175,7 +280,7 @@ export type MessageContentType =
 export interface Action {
   id: string;
   label: string;
-  action: ApprovalActionType;
+  action: LoopInteractiveAction;
   resolved?: boolean;
   resolvedBy?: string;
   resolvedAt?: string;

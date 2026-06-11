@@ -139,6 +139,57 @@ export class GitService {
     return stdout;
   }
 
+  /** 在当前 loop 分支上提交工作区改动（不 push） */
+  async commitWorkspace(
+    loopId: string,
+    commitMessage: string,
+  ): Promise<{ commitSha: string; hadChanges: boolean }> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop?.workspace_path) {
+      throw new Error('工作区未初始化');
+    }
+
+    const cwd = loop.workspace_path;
+    const hasGit = await this.pathExists(join(cwd, '.git'));
+    if (!hasGit) {
+      throw new Error('工作区无 Git 仓库');
+    }
+
+    const project = await this.projectRepo.findById(loop.project_id);
+    const gitConfig = project?.git_config as {
+      credentialRef?: string;
+    } | undefined;
+    const credential = await this.secretManager.get(
+      gitConfig?.credentialRef ?? 'GIT_ACCESS_TOKEN',
+    );
+    const gitEnv = this.secretManager.gitEnv(credential);
+
+    await runCommand('git', ['config', 'user.email', 'loop@ai-native.dev'], { cwd });
+    await runCommand('git', ['config', 'user.name', 'AI Native Loop'], { cwd });
+
+    const { stdout: status } = await runCommand('git', ['status', '--porcelain'], { cwd });
+    let hadChanges = false;
+    if (status.trim()) {
+      hadChanges = true;
+      await runCommand('git', ['add', '-A'], { cwd });
+      await runCommand('git', ['commit', '-m', commitMessage], { cwd, env: gitEnv });
+    }
+
+    const commitSha = await this.currentRef(cwd);
+    if (!commitSha) {
+      throw new Error('无法获取当前 commit');
+    }
+
+    if (hadChanges) {
+      await this.loopRepo.updateContext(loopId, {
+        ...loop.context,
+        gitRef: commitSha,
+      });
+    }
+
+    return { commitSha, hadChanges };
+  }
+
   /**
    * 将当前工作区 HEAD 提交（如有改动）并推送到远程目标分支（默认 test）。
    * 使用 `git push origin HEAD:<targetBranch>`，不切换本地分支。

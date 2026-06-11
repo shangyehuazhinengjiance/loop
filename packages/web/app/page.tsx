@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
+import { ProcessingBanner } from '../components/ProcessingBanner';
 
 const ORCHESTRATOR =
   process.env.NEXT_PUBLIC_ORCHESTRATOR_URL ?? 'http://localhost:3000';
@@ -28,10 +29,13 @@ interface LoopSummary {
 interface ProjectSummary {
   id: string;
   name: string;
-  gitConfig?: { remoteUrl?: string };
+  gitConfig?: { remoteUrl?: string; deploymentExecution?: 'manual' | 'agent' };
   createdAt: string;
   loops: LoopSummary[];
 }
+
+const CREATE_LOOP_PENDING =
+  '正在创建 Loop（若已配置 Git 仓库，初始化可能需要 1–2 分钟）…';
 
 export default function HomePage() {
   const router = useRouter();
@@ -43,9 +47,20 @@ export default function HomePage() {
   const [projectName, setProjectName] = useState('default');
   const [remoteUrl, setRemoteUrl] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
+  const [deploymentExecution, setDeploymentExecution] = useState<'manual' | 'agent'>(
+    'manual',
+  );
   const [existingProjectId, setExistingProjectId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [creatingProjectId, setCreatingProjectId] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [inputRequirements, setInputRequirements] = useState('');
+  const [quickCreate, setQuickCreate] = useState<{
+    projectId: string;
+    title: string;
+    inputRequirements: string;
+  } | null>(null);
 
   const loadProjects = useCallback(async () => {
     setLoadingList(true);
@@ -65,8 +80,14 @@ export default function HomePage() {
     void loadProjects();
   }, [loadProjects]);
 
-  async function createLoopInProject(projectId: string, loopTitle: string) {
+  async function createLoopInProject(
+    projectId: string,
+    loopTitle: string,
+    opts?: { fromForm?: boolean; inputRequirements?: string },
+  ) {
     setLoading(true);
+    if (!opts?.fromForm) setCreatingProjectId(projectId);
+    setPendingMessage(CREATE_LOOP_PENDING);
     setError('');
     try {
       const loopRes = await fetch(
@@ -74,14 +95,22 @@ export default function HomePage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: loopTitle }),
+          body: JSON.stringify({
+            title: loopTitle,
+            ...(opts?.inputRequirements?.trim()
+              ? { inputRequirements: opts.inputRequirements.trim() }
+              : {}),
+          }),
         },
       );
       if (!loopRes.ok) throw new Error(`创建 Loop 失败 ${loopRes.status}`);
       const loop = await loopRes.json();
+      setPendingMessage('创建成功，正在进入群聊…');
       router.push(`/loop/${loop.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : '创建失败');
+      setPendingMessage(null);
+      setCreatingProjectId(null);
     } finally {
       setLoading(false);
     }
@@ -89,10 +118,18 @@ export default function HomePage() {
 
   async function createProjectAndLoop() {
     setLoading(true);
+    setPendingMessage(
+      existingProjectId
+        ? CREATE_LOOP_PENDING
+        : '正在创建项目与 Loop（初始化可能需要 1–2 分钟）…',
+    );
     setError('');
     try {
       if (existingProjectId) {
-        await createLoopInProject(existingProjectId, title);
+        await createLoopInProject(existingProjectId, title, {
+          fromForm: true,
+          inputRequirements,
+        });
         return;
       }
 
@@ -101,6 +138,7 @@ export default function HomePage() {
         gitConfig.remoteUrl = remoteUrl.trim();
         gitConfig.defaultBranch = defaultBranch.trim() || 'main';
         gitConfig.credentialRef = 'GIT_SSH_KEY_PATH';
+        gitConfig.deploymentExecution = deploymentExecution;
       }
 
       const projectBody: Record<string, unknown> = {
@@ -119,15 +157,76 @@ export default function HomePage() {
         throw new Error(`创建项目失败 ${projectRes.status}`);
       }
       const project = await projectRes.json();
-      await createLoopInProject(project.id, title);
+      await createLoopInProject(project.id, title, {
+        fromForm: true,
+        inputRequirements,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : '创建失败');
+      setPendingMessage(null);
+    } finally {
       setLoading(false);
     }
   }
 
+  const busy = loading || Boolean(pendingMessage);
+
   return (
-    <main style={{ maxWidth: 720, margin: '48px auto', padding: 24 }}>
+    <>
+      {pendingMessage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-label={pendingMessage}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(1, 4, 9, 0.72)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <ProcessingBanner label={pendingMessage} />
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 24,
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 420,
+                padding: '28px 32px',
+                borderRadius: 12,
+                border: '1px solid #30363d',
+                background: '#161b22',
+                textAlign: 'center',
+                lineHeight: 1.6,
+              }}
+            >
+              <p style={{ margin: '0 0 8px', fontSize: 16 }}>{pendingMessage}</p>
+              <p style={{ margin: 0, fontSize: 13, color: '#8b949e' }}>
+                请稍候，请勿关闭页面
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main
+        style={{
+          maxWidth: 720,
+          margin: '48px auto',
+          padding: 24,
+          opacity: busy ? 0.6 : 1,
+          pointerEvents: busy ? 'none' : 'auto',
+        }}
+      >
       <h1 style={{ marginBottom: 8 }}>Loop</h1>
       <p style={{ color: '#8b949e', marginBottom: 24 }}>
         群聊协作：PM → Dev → Ops 完整迭代
@@ -247,22 +346,30 @@ export default function HomePage() {
                 )}
                 <button
                   type="button"
-                  disabled={loading}
-                  onClick={() => {
-                    const t = prompt('新 Loop 标题：', '新功能 Loop');
-                    if (t) void createLoopInProject(project.id, t);
-                  }}
+                  disabled={busy}
+                  onClick={() =>
+                    setQuickCreate({
+                      projectId: project.id,
+                      title: '新功能 Loop',
+                      inputRequirements: '',
+                    })
+                  }
                   style={{
                     marginTop: 4,
                     padding: '6px 12px',
                     borderRadius: 6,
-                    border: '1px solid #238636',
-                    background: 'transparent',
-                    color: '#3fb950',
+                    border: `1px solid ${creatingProjectId === project.id ? '#388bfd' : '#238636'}`,
+                    background:
+                      creatingProjectId === project.id ? '#132339' : 'transparent',
+                    color: busy && creatingProjectId !== project.id ? '#8b949e' : '#3fb950',
                     fontSize: 13,
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    opacity: busy && creatingProjectId !== project.id ? 0.6 : 1,
                   }}
                 >
-                  + 在此项目新建 Loop
+                  {creatingProjectId === project.id
+                    ? '创建中…'
+                    : '+ 在此项目新建 Loop'}
                 </button>
               </div>
             ))}
@@ -320,6 +427,21 @@ export default function HomePage() {
               style={inputStyle}
             />
 
+            <label style={{ display: 'block', marginBottom: 8 }}>
+              产品需求文档（可选，Markdown）
+            </label>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#8b949e' }}>
+              若需求已在其他工具写好，可在此粘贴。创建后将保存到代码仓库，PM Agent
+              进入 Loop 时会先阅读并说明理解。
+            </p>
+            <textarea
+              value={inputRequirements}
+              onChange={(e) => setInputRequirements(e.target.value)}
+              placeholder="粘贴 PRD、需求说明、用户故事等…"
+              rows={8}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+            />
+
             {!existingProjectId && (
               <>
                 <label style={{ display: 'block', marginBottom: 8 }}>项目名称</label>
@@ -347,13 +469,28 @@ export default function HomePage() {
                   placeholder="main"
                   style={inputStyle}
                 />
+
+                <label style={{ display: 'block', marginBottom: 8 }}>部署方式</label>
+                <select
+                  value={deploymentExecution}
+                  onChange={(e) =>
+                    setDeploymentExecution(e.target.value as 'manual' | 'agent')
+                  }
+                  style={{ ...inputStyle, marginBottom: 8 }}
+                >
+                  <option value="manual">人工部署（推荐：创建 MR + 通知，人合并/部署/验证）</option>
+                  <option value="agent">Ops Agent 自动部署（需配置 K8s/流水线等）</option>
+                </select>
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: '#8b949e' }}>
+                  人工部署模式下 Ops Agent 只协助创建 MR，不会自动执行 kubectl 等部署操作。
+                </p>
               </>
             )}
 
             <button
               type="button"
               onClick={() => void createProjectAndLoop()}
-              disabled={loading}
+              disabled={busy}
               style={{
                 padding: '10px 20px',
                 borderRadius: 8,
@@ -361,6 +498,8 @@ export default function HomePage() {
                 background: '#238636',
                 color: '#fff',
                 fontWeight: 600,
+                opacity: busy ? 0.7 : 1,
+                cursor: busy ? 'not-allowed' : 'pointer',
               }}
             >
               {loading
@@ -375,5 +514,101 @@ export default function HomePage() {
 
       {error && <p style={{ color: '#f85149', marginTop: 12 }}>{error}</p>}
     </main>
+
+      {quickCreate && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="在此项目新建 Loop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1001,
+            background: 'rgba(1, 4, 9, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+          onClick={() => !busy && setQuickCreate(null)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              padding: 20,
+              borderRadius: 12,
+              border: '1px solid #30363d',
+              background: '#161b22',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>在此项目新建 Loop</h3>
+            <label style={{ display: 'block', marginBottom: 8 }}>Loop 标题</label>
+            <input
+              value={quickCreate.title}
+              onChange={(e) =>
+                setQuickCreate((q) => (q ? { ...q, title: e.target.value } : q))
+              }
+              style={inputStyle}
+            />
+            <label style={{ display: 'block', marginBottom: 8 }}>
+              产品需求文档（可选）
+            </label>
+            <textarea
+              value={quickCreate.inputRequirements}
+              onChange={(e) =>
+                setQuickCreate((q) =>
+                  q ? { ...q, inputRequirements: e.target.value } : q,
+                )
+              }
+              placeholder="粘贴外部需求文档…"
+              rows={6}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setQuickCreate(null)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #30363d',
+                  background: 'transparent',
+                  color: '#e6edf3',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={busy || !quickCreate.title.trim()}
+                onClick={() => {
+                  const { projectId, title: t, inputRequirements: req } = quickCreate;
+                  setQuickCreate(null);
+                  void createLoopInProject(projectId, t.trim(), {
+                    inputRequirements: req,
+                  });
+                }}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#238636',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                  opacity: busy || !quickCreate.title.trim() ? 0.7 : 1,
+                }}
+              >
+                创建并进入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

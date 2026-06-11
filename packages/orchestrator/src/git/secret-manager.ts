@@ -85,4 +85,28 @@ export class SecretManager {
     }
     return {};
   }
+
+  /**
+   * MR API 需 Token（SSH Deploy Key 无法调 GitHub/GitLab MR API）。
+   * 优先项目 gitConfig.mrCredentialRef，否则 GIT_ACCESS_TOKEN。
+   */
+  resolveMrApiCredentialRef(gitConfig?: {
+    mrCredentialRef?: string;
+    credentialRef?: string;
+  }): string {
+    const explicit = gitConfig?.mrCredentialRef?.trim();
+    if (explicit) return explicit;
+
+    const projectRef = gitConfig?.credentialRef?.trim();
+    if (
+      projectRef &&
+      (projectRef === 'GIT_ACCESS_TOKEN' ||
+        projectRef.toLowerCase().includes('token') ||
+        projectRef.startsWith('env:') && projectRef.toLowerCase().includes('token'))
+    ) {
+      return projectRef;
+    }
+
+    return 'GIT_ACCESS_TOKEN';
+  }
 }

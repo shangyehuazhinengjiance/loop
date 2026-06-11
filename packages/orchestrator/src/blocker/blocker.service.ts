@@ -123,7 +123,9 @@ export class BlockerService implements OnModuleInit {
     });
 
     const resumeAgent = this.agentIdToRole(resolved.requestedBy);
-    if (resumeAgent) {
+    const skipOpsResume =
+      resumeAgent === 'ops' && loop.context.deployment?.executionMode === 'manual';
+    if (resumeAgent && !skipOpsResume) {
       await this.agentCoordinator.activate(input.loopId, resumeAgent, {
         reason: 'manual',
         userId: input.userId,

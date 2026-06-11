@@ -19,6 +19,8 @@ export interface RunPmAgentInput {
   members?: LoopMember[];
   triggeredByUserId?: string;
   requirement?: string;
+  projectRequirementsSummary?: string;
+  isLoopEntry?: boolean;
   signal?: AbortSignal;
 }
 
@@ -65,6 +67,9 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     existingPrd: loop.context.prd?.content,
     chatHistory: humanMessages,
     memberRoster: input.memberRoster,
+    projectRequirementsSummary: input.projectRequirementsSummary,
+    isLoopEntry: input.isLoopEntry,
+    inputRequirements: loop.context.inputRequirements,
   });
 
   if (input.model.runtime === 'client-sdk') {
@@ -103,6 +108,7 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
       triggeredByUserId: input.triggeredByUserId,
       model: input.model,
       signal: input.signal,
+      isLoopEntry: input.isLoopEntry,
     });
     return;
   }
@@ -194,6 +200,15 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
         preferUserId: input.triggeredByUserId,
         debug: summarizeAnthropicResponse(response),
       },
+    );
+    return;
+  }
+
+  if (input.isLoopEntry) {
+    await api.postAgentMessage(
+      input.loopId,
+      { type: 'text', body: text },
+      loop.phase,
     );
     return;
   }

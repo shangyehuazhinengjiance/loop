@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS loops (
 -- loop_members（per-Loop 成员；bio 空 = 万能接应）
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS loop_members (
-  loop_id       CHAR(36)     NOT NULL,
+  loop_id       CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   user_id       VARCHAR(255) NOT NULL,
   display_name  VARCHAR(64)  NOT NULL,
   bio           TEXT         NOT NULL,
@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 INSERT IGNORE INTO schema_migrations (version) VALUES
   ('001_initial.sql'),
-  ('002_artifacts_audit.sql');
+  ('002_artifacts_audit.sql'),
+  ('003_loop_members_blocker.sql');
 
 SET FOREIGN_KEY_CHECKS = 1;

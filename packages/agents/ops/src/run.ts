@@ -1,5 +1,16 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import type { LoopMember, Phase, ResolvedModelConfig } from '@loop/shared';
+import {
+  resolveOpsDeployTarget,
+  type Action,
+  type LoopMember,
+  type OpsDeployTarget,
+  type Phase,
+  type ResolvedModelConfig,
+} from '@loop/shared';
+import {
+  buildOpsDeployCompletion,
+  extractDeployUrl,
+} from './deploy-completion.js';
 import { runOpsAgentOpenAI } from './openai-agent.js';
 import { notifyOpsFailure } from './notify-failure.js';
 import { buildOpsPrompt } from './prompts.js';
@@ -14,6 +25,7 @@ export interface RunOpsAgentInput {
   memberRoster?: string;
   members?: LoopMember[];
   triggeredByUserId?: string;
+  deployTarget?: OpsDeployTarget | null;
   signal?: AbortSignal;
 }
 
@@ -52,6 +64,9 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
     console.info(
       `[ops-agent] loop=${input.loopId} runtime=client-sdk model=${input.model.model} baseUrl=${input.model.baseUrl}`,
     );
+    const deployTarget =
+      input.deployTarget ??
+      resolveOpsDeployTarget(loop.context.deployment?.step);
     await runOpsAgentOpenAI({
       api,
       loopId: input.loopId,
@@ -63,6 +78,7 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
       members,
       triggeredByUserId: input.triggeredByUserId,
       model: input.model,
+      deployTarget,
       signal: input.signal,
     });
     return;
@@ -79,7 +95,14 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
     `[ops-agent] loop=${input.loopId} runtime=agent-sdk model=${input.model.model}`,
   );
 
-  const prompt = buildOpsPrompt(loop.context, loop.title, input.memberRoster);
+  const deployTarget =
+    input.deployTarget ?? resolveOpsDeployTarget(loop.context.deployment?.step);
+  const prompt = buildOpsPrompt(
+    loop.context,
+    loop.title,
+    input.memberRoster,
+    deployTarget,
+  );
   let sessionId = loop.context.opsSessionId;
   let posted = false;
 
@@ -97,7 +120,9 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
             const cmd =
               (hookInput as { tool_input?: { command?: string } }).tool_input
                 ?.command ?? '';
-            if (/prod(uction)?/i.test(cmd) && !process.env.OPS_ALLOW_PROD) {
+            const allowProd =
+              deployTarget === 'production' || process.env.OPS_ALLOW_PROD === '1';
+            if (/prod(uction)?/i.test(cmd) && !allowProd) {
               return {
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse' as const,
@@ -151,12 +176,31 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
 
         if (text) {
           posted = true;
-          const stagingMatch = text.match(/https?:\/\/[^\s]+/);
-          const deployment = {
-            ...loop.context.deployment,
-            stagingUrl: stagingMatch?.[0] ?? loop.context.deployment?.stagingUrl,
-            status: 'staging' as const,
-          };
+          const url = extractDeployUrl(text);
+          let deployment = loop.context.deployment;
+          let actions: Action[];
+          let artifactTitle = '## 部署结果';
+
+          if (deployTarget) {
+            const completion = buildOpsDeployCompletion({
+              deployTarget,
+              deployment: loop.context.deployment,
+              bodyText: text,
+              url,
+            });
+            deployment = completion.deployment;
+            actions = completion.actions;
+            artifactTitle = completion.artifactTitle;
+          } else {
+            deployment = {
+              ...loop.context.deployment,
+              stagingUrl: url ?? loop.context.deployment?.stagingUrl,
+              status: 'staging',
+            };
+            actions = [
+              { id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' },
+            ];
+          }
 
           await api.updateContext(input.loopId, {
             ...loop.context,
@@ -168,10 +212,8 @@ export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
             input.loopId,
             {
               type: 'artifact',
-              body: text,
-              actions: [
-                { id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' },
-              ],
+              body: `${artifactTitle}\n\n${text}`,
+              actions,
             },
             input.phase,
           );

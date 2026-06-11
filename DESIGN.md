@@ -296,7 +296,7 @@ interface ModelConfig {
 
 | 转换 | 触发条件 | 系统行为 |
 |------|----------|----------|
-| CREATED → REQUIREMENT | Human 发送首条需求消息 | 激活 PM Agent |
+| CREATED → REQUIREMENT | 成员加入 Loop（`start`）或 Human 发送首条消息 | 激活 PM Agent |
 | REQUIREMENT → DEVELOPMENT | 任一 Human 点击「确认需求」 | 打 Snapshot → 激活 Dev Agent |
 | DEVELOPMENT → DEPLOYMENT | 任一 Human 点击「验收通过」 | 打 Snapshot → 激活 Ops Agent |
 | DEPLOYMENT → DONE | 部署成功 + Human 确认发布 | 打 Snapshot → Loop 完成 |
@@ -323,6 +323,48 @@ Body: {
 4. Dev Agent：fork 新 Agent SDK session（不 resume 旧 session）
 5. 群聊发送系统消息：「已回退到 {phase} 阶段，原因：{reason}」
 6. 激活目标 Phase 对应 Agent
+
+### 4.4 创建 Loop 时导入外部需求
+
+产品可能在其他工具中已写好需求文档。创建 Loop 时可粘贴 Markdown，系统在进入群聊前完成落库。
+
+```
+创建表单（可选「产品需求文档」）
+        │
+        ▼
+POST /api/projects/{id}/loops
+  { title, inputRequirements?, inputRequirementsTitle? }
+        │
+        ▼
+Git 工作区初始化（clone + loop/{id} 分支）
+        │
+        ▼
+写入 docs/loop/{loopId}/INPUT_REQUIREMENTS.md
+commit + push（若配置远程仓库）
+        │
+        ▼
+context.inputRequirements + 群聊系统消息（路径与推送结果）
+        │
+        ▼
+成员加入 Loop → requirement 阶段 → PM Agent
+        │
+        ├─ 有导入文档：熟悉需求（理解要点 + 待澄清项），不产出可审批 PRD
+        └─ 无导入文档：欢迎 + 阅读项目需求总结，邀请描述本 Loop 目标
+        │
+        ▼
+成员在群聊补充 / 确认 → PM 产出正式 PRD + 「确认需求」
+        │
+        ▼
+后续流程不变（development 双模式、部署 MR 等）
+```
+
+**三类需求上下文（勿混淆）：**
+
+| 来源 | 存储位置 | 用途 |
+|------|----------|------|
+| 项目需求总结 | `_project-cache/{projectId}/requirements-summary.md` | 历史 Loop 累积背景 |
+| 本 Loop 导入需求 | `docs/loop/{id}/INPUT_REQUIREMENTS.md` + `context.inputRequirements` | 本次创建时粘贴的原始需求 |
+| 正式 PRD | `context.prd` → 确认后可发布 `docs/loop/{id}/PRD.md` | 可审批、可开发的结构化需求 |
 
 ---
 
@@ -365,8 +407,15 @@ const response = await client.messages.create({
 #### 输入 Context
 
 - 群聊历史（需求相关 Phase 的消息）
+- 项目需求文档总结（`_project-cache`）
+- 创建时导入的外部需求（`context.inputRequirements`，首轮仅熟悉不产出 PRD）
 - 已有 PRD（回退场景）
 - 项目约束（`constraints[]`）
+
+#### 进入 Loop 首轮（`isLoopEntry`）
+
+- **有导入需求**：说明文档已写入 Git 路径；结合项目总结阐述理解要点与待澄清项；邀请成员补充；**不**输出完整 PRD 或「确认需求」按钮。
+- **无导入需求**：欢迎成员；简述对项目总结的理解；邀请描述本 Loop 目标；同样不产出 PRD。
 
 #### 输出
 
@@ -740,7 +789,7 @@ interface ApprovalRecord {
 ```
 POST   /api/projects                          创建项目
 GET    /api/projects/{id}                     获取项目
-POST   /api/projects/{id}/loops               创建 Loop
+POST   /api/projects/{id}/loops               创建 Loop（body 可选 inputRequirements、inputRequirementsTitle）
 GET    /api/loops/{id}                        获取 Loop 详情
 POST   /api/loops/{id}/start                  启动 Loop（进入 REQUIREMENT）
 POST   /api/loops/{id}/rollback               回退到指定阶段

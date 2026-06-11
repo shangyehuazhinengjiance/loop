@@ -1,2 +1,2 @@
-export { runPmAgent } from './run.js';
+export { runPmAgent, type RunPmAgentInput } from './run.js';
 export { PM_SYSTEM_PROMPT } from './prompts.js';
