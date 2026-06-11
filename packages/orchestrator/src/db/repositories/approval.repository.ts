@@ -13,6 +13,14 @@ export interface ApprovalRow {
   created_at: Date;
 }
 
+const PHASE_PIPELINE: Phase[] = [
+  'created',
+  'requirement',
+  'development',
+  'deployment',
+  'done',
+];
+
 export class ApprovalRepository {
   constructor(private readonly pool: DbPool = getPool()) {}
 
@@ -57,6 +65,22 @@ export class ApprovalRepository {
       this.pool,
       'SELECT * FROM approvals WHERE loop_id = ? ORDER BY created_at ASC',
       [loopId],
+    );
+  }
+
+  /** 回退后清除目标阶段及之后阶段的审批记录，允许重新确认 */
+  async deleteApprovalsFromPhaseOnwards(
+    loopId: string,
+    fromPhase: Phase,
+  ): Promise<void> {
+    const idx = PHASE_PIPELINE.indexOf(fromPhase);
+    if (idx < 0) return;
+    const phases = PHASE_PIPELINE.slice(idx);
+    const placeholders = phases.map(() => '?').join(', ');
+    await dbQuery(
+      this.pool,
+      `DELETE FROM approvals WHERE loop_id = ? AND phase IN (${placeholders})`,
+      [loopId, ...phases],
     );
   }
 }
