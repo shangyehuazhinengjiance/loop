@@ -8,17 +8,15 @@ import {
 import {
   BadRequestException,
   ForbiddenException,
-  Inject,
   Injectable,
   NotFoundException,
-  forwardRef,
 } from '@nestjs/common';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
-import { ApprovalService } from '../approval/approval.service.js';
 import { ChatService } from '../chat/chat.service.js';
+import { PhaseService } from '../phase/phase.service.js';
 import { PrdPublishService } from './prd-publish.service.js';
 
 @Injectable()
@@ -30,8 +28,7 @@ export class DevelopmentService {
     private readonly chatService: ChatService,
     private readonly prdPublish: PrdPublishService,
     private readonly agentCoordinator: AgentCoordinator,
-    @Inject(forwardRef(() => ApprovalService))
-    private readonly approvalService: ApprovalService,
+    private readonly phaseService: PhaseService,
   ) {}
 
   async getPrdApprovedBy(loopId: string): Promise<string | null> {
@@ -302,11 +299,25 @@ export class DevelopmentService {
       },
     });
 
-    await this.approvalService.approve({
+    const exists = await this.approvalRepo.hasApprovalInPhase(
+      input.loopId,
+      'approve_dev',
+      loop.phase,
+    );
+    if (exists) return;
+
+    await this.approvalRepo.create({
       loopId: input.loopId,
       action: 'approve_dev',
       approvedBy: input.userId,
+      phase: loop.phase,
       note: input.note,
     });
+    await this.phaseService.approve(
+      input.loopId,
+      'approve_dev',
+      input.userId,
+      input.note,
+    );
   }
 }

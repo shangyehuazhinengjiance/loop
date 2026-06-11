@@ -1,5 +1,5 @@
 import type { ApprovalActionType } from '@loop/shared';
-import { Inject, Injectable, BadRequestException, forwardRef } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { DevelopmentService } from '../development/development.service.js';
@@ -22,7 +22,6 @@ export class ApprovalService {
     private readonly approvalRepo: ApprovalRepository,
     private readonly loopRepo: LoopRepository,
     private readonly phaseService: PhaseService,
-    @Inject(forwardRef(() => DevelopmentService))
     private readonly developmentService: DevelopmentService,
     private readonly deploymentService: DeploymentService,
   ) {}
