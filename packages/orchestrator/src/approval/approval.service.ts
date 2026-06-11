@@ -71,7 +71,7 @@ export class ApprovalService {
       input.action,
       loop.phase,
     );
-    if (exists) {
+    if (exists && input.action !== 'approve_test') {
       return { duplicate: true, action: input.action, phase: loop.phase };
     }
 
@@ -120,26 +120,20 @@ export class ApprovalService {
       ) {
         throw new BadRequestException('当前不在等待测试环境审批状态');
       }
-      const exists = await this.approvalRepo.hasApprovalInPhase(
-        input.loopId,
-        input.action,
-        loop.phase,
-      );
-      if (exists) {
-        return { duplicate: true, action: input.action, phase: loop.phase };
+      if (!exists) {
+        await this.approvalRepo.create({
+          loopId: input.loopId,
+          action: input.action,
+          approvedBy: input.approvedBy,
+          phase: loop.phase,
+          note: input.note,
+        });
       }
-      await this.approvalRepo.create({
-        loopId: input.loopId,
-        action: input.action,
-        approvedBy: input.approvedBy,
-        phase: loop.phase,
-        note: input.note,
-      });
       await this.deploymentService.onTestApproved(
         input.loopId,
         input.approvedBy,
       );
-      return { duplicate: false, action: input.action, phase: loop.phase };
+      return { duplicate: exists, action: input.action, phase: loop.phase };
     }
 
     if (input.action === 'reject_test') {
