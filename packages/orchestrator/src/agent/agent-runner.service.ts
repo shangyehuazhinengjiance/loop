@@ -3,6 +3,7 @@ import {
   failureMentions,
   formatMemberRoster,
   pickNotifyMember,
+  resolveOpsDeployTarget,
   type AgentRole,
   type Phase,
 } from '@loop/shared';
@@ -273,13 +274,17 @@ export class AgentRunnerService implements OnModuleInit {
     }
 
     if (agent === 'ops') {
+      const deployTarget = resolveOpsDeployTarget(
+        loop.context.deployment?.step,
+      );
       console.info(
-        `[agent-runner] ops start loop=${loopId} runtime=${model.runtime} model=${model.model}`,
+        `[agent-runner] ops start loop=${loopId} runtime=${model.runtime} model=${model.model} deploy=${deployTarget ?? 'legacy'}`,
       );
       await runOpsAgent({
         ...common,
         workspacePath,
         phase,
+        deployTarget,
       });
     }
   }

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "npm run build -w @loop/agent-pm",
+    "prebuild": "npm run build -w @loop/agent-pm && npm run build -w @loop/agent-ops",
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx --watch src/main.ts",
     "start": "node dist/main.js",

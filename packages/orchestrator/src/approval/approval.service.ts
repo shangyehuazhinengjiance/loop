@@ -13,6 +13,8 @@ const ACTION_REQUIRED_PHASE: Record<
   approve_prd: 'requirement',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
+  approve_test: 'deployment',
+  reject_test: 'deployment',
   approve_deploy: 'deployment',
 };
 
@@ -69,6 +71,84 @@ export class ApprovalService {
         note: input.note,
       });
       return { duplicate: false, action: input.action, phase: loop.phase };
+    }
+
+    if (input.action === 'approve_test') {
+      const dep = loop.context.deployment;
+      if (
+        dep?.step !== 'awaiting_test_approval' &&
+        dep?.step !== 'awaiting_pipeline'
+      ) {
+        throw new BadRequestException('当前不在等待测试环境审批状态');
+      }
+      const exists = await this.approvalRepo.hasApprovalInPhase(
+        input.loopId,
+        input.action,
+        loop.phase,
+      );
+      if (exists) {
+        return { duplicate: true, action: input.action, phase: loop.phase };
+      }
+      await this.approvalRepo.create({
+        loopId: input.loopId,
+        action: input.action,
+        approvedBy: input.approvedBy,
+        phase: loop.phase,
+        note: input.note,
+      });
+      await this.deploymentService.startProdDeploy(
+        input.loopId,
+        input.approvedBy,
+      );
+      return { duplicate: false, action: input.action, phase: loop.phase };
+    }
+
+    if (input.action === 'reject_test') {
+      const dep = loop.context.deployment;
+      if (
+        dep?.step !== 'awaiting_test_approval' &&
+        dep?.step !== 'awaiting_pipeline'
+      ) {
+        throw new BadRequestException('当前不在等待测试环境审批状态');
+      }
+      await this.approvalRepo.create({
+        loopId: input.loopId,
+        action: input.action,
+        approvedBy: input.approvedBy,
+        phase: loop.phase,
+        note: input.note,
+      });
+      await this.deploymentService.markTestRejected(
+        input.loopId,
+        input.approvedBy,
+        input.note,
+      );
+      await this.phaseService.rollback(
+        input.loopId,
+        'development',
+        input.note ?? '测试环境验证未通过',
+        input.approvedBy,
+      );
+      const prdBy = await this.developmentService.getPrdApprovedBy(input.loopId);
+      if (prdBy) {
+        await this.developmentService.onEnterDevelopment(input.loopId, prdBy, {
+          reprompt: true,
+        });
+      }
+      return { duplicate: false, action: input.action, phase: loop.phase };
+    }
+
+    if (input.action === 'approve_deploy') {
+      const dep = loop.context.deployment;
+      if (
+        dep?.step &&
+        dep.step !== 'awaiting_prod_approval' &&
+        dep.step !== 'awaiting_pipeline'
+      ) {
+        throw new BadRequestException(
+          '请先完成测试环境审批与生产部署，再确认正式上线',
+        );
+      }
     }
 
     await this.approvalRepo.create({

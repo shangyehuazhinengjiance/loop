@@ -40,6 +40,8 @@ export type ApprovalActionType =
   | 'approve_prd'
   | 'approve_dev'
   | 'confirm_mr_merged'
+  | 'approve_test'
+  | 'reject_test'
   | 'approve_deploy'
   | 'rollback';
 
@@ -82,7 +84,16 @@ export interface Task {
   assigneeDisplayName?: string;
 }
 
-export type DeploymentStep = 'awaiting_mr_merge' | 'awaiting_pipeline';
+export type DeploymentStep =
+  | 'awaiting_mr_merge'
+  /** @deprecated 旧流程，等同 awaiting_test_approval */
+  | 'awaiting_pipeline'
+  | 'awaiting_test_deploy'
+  | 'awaiting_test_approval'
+  | 'awaiting_prod_deploy'
+  | 'awaiting_prod_approval';
+
+export type OpsDeployTarget = 'test' | 'production';
 
 export interface MergeRequestInfo {
   url: string;
@@ -107,6 +118,14 @@ export interface DeploymentInfo {
   mergeAssigneeDisplayName?: string;
   mrMergedAt?: string;
   mrMergedBy?: string;
+  testDeployedAt?: string;
+  testApprovedAt?: string;
+  testApprovedBy?: string;
+  testRejectedAt?: string;
+  testRejectedBy?: string;
+  testApproverUserId?: string;
+  testApproverDisplayName?: string;
+  prodDeployedAt?: string;
 }
 
 export type DevelopmentMode = 'agent' | 'external';

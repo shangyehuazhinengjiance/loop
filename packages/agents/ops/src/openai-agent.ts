@@ -1,4 +1,13 @@
-import type { LoopMember, ResolvedModelConfig } from '@loop/shared';
+import type {
+  Action,
+  LoopMember,
+  OpsDeployTarget,
+  ResolvedModelConfig,
+} from '@loop/shared';
+import {
+  buildOpsDeployCompletion,
+  extractDeployUrl,
+} from './deploy-completion.js';
 import {
   DEV_TOOL_DEFINITIONS,
   executeDevTool,
@@ -76,6 +85,7 @@ export async function runOpsAgentOpenAI(input: {
   members: LoopMember[];
   triggeredByUserId?: string;
   model: ResolvedModelConfig;
+  deployTarget?: OpsDeployTarget | null;
   signal?: AbortSignal;
 }): Promise<void> {
   const fail = (reason: string, debug?: string) =>
@@ -92,24 +102,32 @@ export async function runOpsAgentOpenAI(input: {
     {
       role: 'system',
       content:
-        buildOpsPrompt(input.context, input.title, input.memberRoster) +
-        OPENAI_SYSTEM_SUFFIX,
+        buildOpsPrompt(
+          input.context,
+          input.title,
+          input.memberRoster,
+          input.deployTarget,
+        ) + OPENAI_SYSTEM_SUFFIX,
     },
     {
       role: 'user',
       content:
-        '请根据当前部署状态完成 staging 部署准备。先读取工作区中的 Dockerfile 与 CI 配置。',
+        input.deployTarget === 'production'
+          ? '测试环境已通过审批，请完成生产环境正式上线。先读取 deploy/k8s 与 CI 配置。'
+          : input.deployTarget === 'test'
+            ? 'MR 已合并，请完成测试环境部署与验证。先读取 Dockerfile 与 CI 配置。'
+            : '请根据当前部署状态完成 staging 部署准备。先读取工作区中的 Dockerfile 与 CI 配置。',
     },
   ];
 
-  const url = chatCompletionsUrl(input.model.baseUrl!);
+  const completionsUrl = chatCompletionsUrl(input.model.baseUrl!);
   let finalText = '';
   let humanBlocked = false;
 
   for (let turn = 0; turn < maxTurns(); turn++) {
     if (input.signal?.aborted) return;
 
-    const res = await fetch(url, {
+    const res = await fetch(completionsUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -181,7 +199,9 @@ export async function runOpsAgentOpenAI(input: {
 
       if (name === 'bash') {
         const cmd = String(args.command ?? '');
-        if (/prod(uction)?/i.test(cmd) && !process.env.OPS_ALLOW_PROD) {
+        const allowProd =
+          input.deployTarget === 'production' || process.env.OPS_ALLOW_PROD === '1';
+        if (/prod(uction)?/i.test(cmd) && !allowProd) {
           messages.push({
             role: 'tool',
             tool_call_id: call.id,
@@ -231,13 +251,33 @@ export async function runOpsAgentOpenAI(input: {
     return;
   }
 
-  const stagingMatch = finalText.match(/https?:\/\/[^\s]+/);
+  const url = extractDeployUrl(finalText);
   const loop = await input.api.getLoop(input.loopId);
-  const deployment = {
-    ...loop.context.deployment,
-    stagingUrl: stagingMatch?.[0] ?? loop.context.deployment?.stagingUrl,
-    status: 'staging' as const,
-  };
+  let deployment = loop.context.deployment;
+  let actions: Action[];
+  let artifactTitle = '## 部署结果';
+
+  if (input.deployTarget) {
+    const completion = buildOpsDeployCompletion({
+      deployTarget: input.deployTarget,
+      deployment: loop.context.deployment,
+      bodyText: finalText,
+      url,
+    });
+    deployment = completion.deployment;
+    actions = completion.actions;
+    artifactTitle = completion.artifactTitle;
+  } else {
+    deployment = {
+      ...loop.context.deployment,
+      stagingUrl: url ?? loop.context.deployment?.stagingUrl,
+      status: 'staging',
+    };
+    actions = [
+      { id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' },
+    ];
+  }
+
   await input.api.updateContext(input.loopId, {
     ...loop.context,
     deployment,
@@ -247,8 +287,8 @@ export async function runOpsAgentOpenAI(input: {
     input.loopId,
     {
       type: 'artifact',
-      body: finalText,
-      actions: [{ id: 'approve-deploy', label: '确认发布', action: 'approve_deploy' }],
+      body: `${artifactTitle}\n\n${finalText}`,
+      actions,
     },
     input.phase,
   );
