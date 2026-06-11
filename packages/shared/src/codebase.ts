@@ -14,3 +14,8 @@ export const PROJECT_LOOP_SUMMARIES_DIR = 'loops';
 export function loopInputRequirementsRelPath(loopId: string): string {
   return `docs/loop/${loopId}/INPUT_REQUIREMENTS.md`;
 }
+
+/** PM 首轮需求理解纪要（相对工作区根目录） */
+export function loopRequirementUnderstandingRelPath(loopId: string): string {
+  return `docs/loop/${loopId}/REQUIREMENT_UNDERSTANDING.md`;
+}

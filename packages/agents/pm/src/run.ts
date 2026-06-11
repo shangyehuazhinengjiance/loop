@@ -8,8 +8,11 @@ import { summarizeAnthropicResponse } from './debug.js';
 import { buildPMUserPrompt, PM_SYSTEM_PROMPT } from './prompts.js';
 import { handlePmHumanHelp } from './human-help.js';
 import { notifyPmFailure } from './notify-failure.js';
+import { finishPmLoopEntry } from './finish-loop-entry.js';
 import { runPmAgentOpenAI } from './openai-agent.js';
-import { OrchestratorApi, parsePrdAndTasks } from './orchestrator-api.js';
+import { reportPmPreLlmProgress } from './pm-progress.js';
+import { finishPmPrd } from './finish-prd.js';
+import { OrchestratorApi } from './orchestrator-api.js';
 
 export interface RunPmAgentInput {
   loopId: string;
@@ -22,26 +25,6 @@ export interface RunPmAgentInput {
   projectRequirementsSummary?: string;
   isLoopEntry?: boolean;
   signal?: AbortSignal;
-}
-
-async function finishPmSuccess(
-  api: OrchestratorApi,
-  loopId: string,
-  phase: string,
-  text: string,
-): Promise<void> {
-  const loop = await api.getLoop(loopId);
-  const { prd, tasks } = parsePrdAndTasks(text);
-  await api.updateContext(loopId, { ...loop.context, prd, tasks });
-  await api.postAgentMessage(
-    loopId,
-    {
-      type: 'artifact',
-      body: text,
-      actions: [{ id: 'approve-prd', label: '确认需求', action: 'approve_prd' }],
-    },
-    phase,
-  );
 }
 
 export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
@@ -70,6 +53,11 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     projectRequirementsSummary: input.projectRequirementsSummary,
     isLoopEntry: input.isLoopEntry,
     inputRequirements: loop.context.inputRequirements,
+  });
+
+  await reportPmPreLlmProgress(api, loop, {
+    isLoopEntry: input.isLoopEntry,
+    projectRequirementsSummary: input.projectRequirementsSummary,
   });
 
   if (input.model.runtime === 'client-sdk') {
@@ -128,22 +116,36 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     return;
   }
 
+  const pmTimeoutMs = parseInt(
+    process.env.PM_LLM_TIMEOUT_MS ??
+      process.env.LLM_FETCH_TIMEOUT_MS ??
+      '180000',
+    10,
+  );
   const client = new Anthropic({
     apiKey: input.model.apiKey,
     baseURL: input.model.baseUrl,
+    timeout: pmTimeoutMs,
   });
+
+  const maxTokens = input.isLoopEntry
+    ? parseInt(process.env.PM_LOOP_ENTRY_MAX_TOKENS ?? '1536', 10)
+    : input.model.extra?.max_tokens
+      ? parseInt(input.model.extra.max_tokens, 10)
+      : 8192;
 
   let response: Anthropic.Message;
   try {
-    response = await client.messages.create({
-      model: input.model.model,
-      max_tokens: input.model.extra?.max_tokens
-        ? parseInt(input.model.extra.max_tokens, 10)
-        : 8192,
-      system: PM_SYSTEM_PROMPT,
-      tools: [REQUEST_HUMAN_HELP_ANTHROPIC_TOOL],
-      messages: [{ role: 'user', content: userContent }],
-    });
+    response = await client.messages.create(
+      {
+        model: input.model.model,
+        max_tokens: maxTokens,
+        system: PM_SYSTEM_PROMPT,
+        tools: [REQUEST_HUMAN_HELP_ANTHROPIC_TOOL],
+        messages: [{ role: 'user', content: userContent }],
+      },
+      input.signal ? { signal: input.signal } : undefined,
+    );
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     await notifyPmFailure(
@@ -205,13 +207,9 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
   }
 
   if (input.isLoopEntry) {
-    await api.postAgentMessage(
-      input.loopId,
-      { type: 'text', body: text },
-      loop.phase,
-    );
+    await finishPmLoopEntry(api, input.loopId, loop.phase, text);
     return;
   }
 
-  await finishPmSuccess(api, input.loopId, loop.phase, text);
+  await finishPmPrd(api, input.loopId, loop.phase, text);
 }

@@ -10,6 +10,7 @@ import { GitService } from '../git/git.service.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
 import { ChatService } from '../chat/chat.service.js';
+import { LoopProgressService } from '../chat/loop-progress.service.js';
 
 @Injectable()
 export class InputRequirementsService {
@@ -18,6 +19,7 @@ export class InputRequirementsService {
     private readonly projectRepo: ProjectRepository,
     private readonly gitService: GitService,
     private readonly chatService: ChatService,
+    private readonly progress: LoopProgressService,
   ) {}
 
   /**
@@ -51,20 +53,46 @@ export class InputRequirementsService {
     await mkdir(join(loop.workspace_path, 'docs', 'loop', input.loopId), {
       recursive: true,
     });
+    await this.progress.publish({
+      loopId: input.loopId,
+      phase: loop.phase,
+      label: '正在写入导入的需求文档…',
+      detail: `路径：\`${gitPath}\``,
+    });
     await writeFile(absPath, `${header}${trimmed}\n`, 'utf-8');
 
     let commitSha: string | undefined;
     const project = await this.projectRepo.findById(loop.project_id);
     const gitConfig = project?.git_config as { remoteUrl?: string } | undefined;
+    const branch = loop.git_branch ?? `loop/${input.loopId}`;
 
     try {
+      await this.progress.publish({
+        loopId: input.loopId,
+        phase: loop.phase,
+        label: '正在提交到 Git…',
+        detail: `分支：\`${branch}\``,
+      });
       const { commitSha: sha } = await this.gitService.commitWorkspace(
         input.loopId,
         `loop ${input.loopId}: import input requirements`,
       );
       commitSha = sha;
       if (gitConfig?.remoteUrl) {
+        await this.progress.publish({
+          loopId: input.loopId,
+          phase: loop.phase,
+          label: '正在推送到远端…',
+          detail: `分支 \`${branch}\``,
+        });
         await this.gitService.pushLoopBranch(input.loopId);
+        await this.progress.publish({
+          loopId: input.loopId,
+          phase: loop.phase,
+          label: '需求文档已推送到远端',
+          detail: commitSha ? `commit：\`${commitSha.slice(0, 7)}\`` : undefined,
+          updateBanner: false,
+        });
       }
     } catch (err) {
       console.warn(`[input-requirements] git commit failed for ${input.loopId}:`, err);

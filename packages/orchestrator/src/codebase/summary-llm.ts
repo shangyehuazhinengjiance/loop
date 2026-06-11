@@ -1,4 +1,4 @@
-import type { ResolvedModelConfig } from '@loop/shared';
+import { fetchWithTimeout, type ResolvedModelConfig } from '@loop/shared';
 import type { WorkspaceSnapshot } from './workspace-scanner.js';
 
 const SYSTEM_PROMPT = `你是代码库分析助手。根据目录树和关键配置文件，输出一份简洁的 Markdown 代码库摘要，供后续 AI 开发 Agent 快速理解项目，减少盲目扫描仓库。
@@ -47,7 +47,7 @@ export async function generateCodebaseSummary(
     throw new Error('No base URL for codebase summary (PM_MODEL_BASE_URL)');
   }
 
-  const res = await fetch(chatCompletionsUrl(model.baseUrl), {
+  const res = await fetchWithTimeout(chatCompletionsUrl(model.baseUrl), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -62,6 +62,7 @@ export async function generateCodebaseSummary(
       max_tokens: 2048,
       temperature: 0.2,
     }),
+    timeoutMs: parseInt(process.env.LLM_FETCH_TIMEOUT_MS ?? '180000', 10),
   });
 
   if (!res.ok) {

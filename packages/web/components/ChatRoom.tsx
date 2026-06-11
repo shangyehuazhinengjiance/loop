@@ -47,7 +47,12 @@ interface Action {
 interface Message {
   id: string;
   sender: { type: string; id: string; displayName: string };
-  content: { type: string; body: string; actions?: Action[]; mentions?: string[] };
+  content: {
+    type: string;
+    body: string;
+    actions?: Action[];
+    mentions?: string[];
+  };
   phase: string;
   metadata?: { timestamp?: string; sdkMessageType?: string };
 }
@@ -1254,7 +1259,10 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>
                 {m.sender.displayName} · {m.phase}
-                {m.content.type !== 'text' && ` · ${m.content.type}`}
+                {m.content.type !== 'text' &&
+                  m.content.type !== 'progress' &&
+                  ` · ${m.content.type}`}
+                {m.content.type === 'progress' && ' · 进度'}
               </span>
               {mentionsYou && (
                 <span
@@ -1267,23 +1275,31 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             </div>
             <div
               style={{
-                padding: '10px 14px',
+                padding: m.content.type === 'progress' ? '8px 12px' : '10px 14px',
                 borderRadius: 8,
-                background: mentionsYou
-                  ? '#132339'
-                  : m.sender.type === 'human' && m.sender.id === user?.userId
-                    ? '#1a2332'
-                    : m.sender.type === 'human'
-                      ? '#161b22'
-                      : '#1c2128',
-                border: mentionUnread
-                  ? '1px solid #388bfd'
-                  : mentionsYou
-                    ? '1px solid #388bfd66'
-                    : m.sender.id === user?.userId
-                      ? '1px solid #388bfd66'
-                      : '1px solid #30363d',
+                background:
+                  m.content.type === 'progress'
+                    ? '#0d1117'
+                    : mentionsYou
+                      ? '#132339'
+                      : m.sender.type === 'human' && m.sender.id === user?.userId
+                        ? '#1a2332'
+                        : m.sender.type === 'human'
+                          ? '#161b22'
+                          : '#1c2128',
+                border:
+                  m.content.type === 'progress'
+                    ? '1px dashed #30363d'
+                    : mentionUnread
+                      ? '1px solid #388bfd'
+                      : mentionsYou
+                        ? '1px solid #388bfd66'
+                        : m.sender.id === user?.userId
+                          ? '1px solid #388bfd66'
+                          : '1px solid #30363d',
                 boxShadow: mentionUnread ? '0 0 0 1px #388bfd44' : undefined,
+                fontSize: m.content.type === 'progress' ? 13 : undefined,
+                color: m.content.type === 'progress' ? '#8b949e' : undefined,
               }}
             >
               <MarkdownContent content={m.content.body} />

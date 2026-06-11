@@ -1,11 +1,12 @@
 import type { LoopMember, ResolvedModelConfig } from '@loop/shared';
-import { REQUEST_HUMAN_HELP_OPENAI_TOOL } from '@loop/shared';
+import { fetchWithTimeout, REQUEST_HUMAN_HELP_OPENAI_TOOL } from '@loop/shared';
+import { finishPmLoopEntry } from './finish-loop-entry.js';
+import { finishPmPrd } from './finish-prd.js';
 import { summarizeOpenAIResponse } from './debug.js';
 import { handlePmHumanHelp } from './human-help.js';
 import { notifyPmFailure } from './notify-failure.js';
 import { PM_SYSTEM_PROMPT } from './prompts.js';
 import type { OrchestratorApi } from './orchestrator-api.js';
-import { parsePrdAndTasks } from './orchestrator-api.js';
 
 interface ChatCompletionResponse {
   choices?: {
@@ -55,27 +56,59 @@ export async function runPmAgentOpenAI(input: {
     .filter(Boolean)
     .join('\n\n');
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${input.model.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: input.model.model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: input.userContent },
-      ],
-      tools: [REQUEST_HUMAN_HELP_OPENAI_TOOL],
-      tool_choice: 'auto',
-      temperature: 0.3,
-      max_tokens: input.model.extra?.max_tokens
-        ? parseInt(input.model.extra.max_tokens, 10)
-        : 8192,
-    }),
-    signal: input.signal,
-  });
+  const maxTokens = input.isLoopEntry
+    ? parseInt(process.env.PM_LOOP_ENTRY_MAX_TOKENS ?? '1536', 10)
+    : input.model.extra?.max_tokens
+      ? parseInt(input.model.extra.max_tokens, 10)
+      : 8192;
+
+  const timeoutMs = parseInt(
+    process.env.PM_LLM_TIMEOUT_MS ??
+      process.env.LLM_FETCH_TIMEOUT_MS ??
+      '180000',
+    10,
+  );
+
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.model.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.model.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: input.userContent },
+        ],
+        tools: [REQUEST_HUMAN_HELP_OPENAI_TOOL],
+        tool_choice: 'auto',
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      }),
+      signal: input.signal,
+      timeoutMs,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await notifyPmFailure(
+      input.api,
+      input.loopId,
+      input.phase,
+      detail.includes('超时') ? detail : `LLM 请求异常：${detail}`,
+      input.members,
+      {
+        preferUserId: input.triggeredByUserId,
+        hints: [
+          '检查 PM_MODEL_BASE_URL / PM_MODEL_API_KEY 是否可达',
+          `当前超时 ${timeoutMs}ms，可调大 PM_LLM_TIMEOUT_MS`,
+        ],
+      },
+    );
+    return;
+  }
 
   const rawText = await res.text();
   let data: ChatCompletionResponse;
@@ -157,24 +190,9 @@ export async function runPmAgentOpenAI(input: {
   }
 
   if (input.isLoopEntry) {
-    await input.api.postAgentMessage(
-      input.loopId,
-      { type: 'text', body: text },
-      input.phase,
-    );
+    await finishPmLoopEntry(input.api, input.loopId, input.phase, text);
     return;
   }
 
-  const loop = await input.api.getLoop(input.loopId);
-  const { prd, tasks } = parsePrdAndTasks(text);
-  await input.api.updateContext(input.loopId, { ...loop.context, prd, tasks });
-  await input.api.postAgentMessage(
-    input.loopId,
-    {
-      type: 'artifact',
-      body: text,
-      actions: [{ id: 'approve-prd', label: '确认需求', action: 'approve_prd' }],
-    },
-    input.phase,
-  );
+  await finishPmPrd(input.api, input.loopId, input.phase, text);
 }
