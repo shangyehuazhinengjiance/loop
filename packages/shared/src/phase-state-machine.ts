@@ -46,8 +46,12 @@ export class PhaseStateMachine {
   }
 
   canRollback(from: Phase, targetPhase: Phase): boolean {
-    const allowed = ROLLBACK_TARGETS[from] ?? [];
-    return allowed.includes(targetPhase);
+    return this.getRollbackTargets(from).includes(targetPhase);
+  }
+
+  /** 状态机允许的回退目标（仅更早阶段，不含向前跳转） */
+  getRollbackTargets(from: Phase): Phase[] {
+    return ROLLBACK_TARGETS[from] ?? [];
   }
 
   transition(from: Phase, trigger: TransitionTrigger): TransitionResult {

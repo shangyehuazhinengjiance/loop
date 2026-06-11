@@ -310,6 +310,11 @@ export class LoopController {
     });
   }
 
+  @Get('loops/:id/phase/switch-options')
+  async getPhaseSwitchOptions(@Param('id') id: string) {
+    return this.phaseService.getPhaseSwitchOptions(id);
+  }
+
   @Post('loops/:id/rollback')
   async rollback(
     @Param('id') id: string,

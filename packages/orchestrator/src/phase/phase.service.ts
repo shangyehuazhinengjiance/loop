@@ -1,4 +1,7 @@
 import {
+  collectReachedPhases,
+  getAllowedPhaseSwitchTargets,
+  PHASE_LABEL_ZH,
   PhaseStateMachine,
   PhaseTransitionError,
   type ApprovalActionType,
@@ -6,7 +9,7 @@ import {
   type Phase,
   type TransitionTrigger,
 } from '@loop/shared';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { LoopRow } from '../db/repositories/loop.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ChatService } from '../chat/chat.service.js';
@@ -19,6 +22,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { DeploymentService } from '../deployment/deployment.service.js';
 import { RequirementsSummaryService } from '../requirements/requirements-summary.service.js';
 import { LoopDotLoopService } from '../loop-context/loop-dot-loop.service.js';
+import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 
 export interface PhaseChangeEvent {
   loopId: string;
@@ -44,10 +48,45 @@ export class PhaseService {
     private readonly deploymentService: DeploymentService,
     private readonly requirementsSummary: RequirementsSummaryService,
     private readonly loopDotLoop: LoopDotLoopService,
+    private readonly approvalRepo: ApprovalRepository,
   ) {}
 
   getStateMachine(): PhaseStateMachine {
     return this.stateMachine;
+  }
+
+  async getPhaseSwitchOptions(loopId: string): Promise<{
+    currentPhase: Phase;
+    currentLabel: string;
+    reachedPhases: { phase: Phase; label: string }[];
+    switchTargets: { phase: Phase; label: string }[];
+  }> {
+    const loop = await this.requireLoop(loopId);
+    const transitions = await this.transitionRepo.listByLoop(loopId);
+    const reachedPhases = collectReachedPhases(
+      loop.phase,
+      transitions.map((t) => ({
+        fromPhase: t.from_phase,
+        toPhase: t.to_phase,
+      })),
+    );
+    const switchTargets = getAllowedPhaseSwitchTargets(
+      loop.phase,
+      reachedPhases,
+      this.stateMachine.getRollbackTargets(loop.phase),
+    );
+    return {
+      currentPhase: loop.phase,
+      currentLabel: PHASE_LABEL_ZH[loop.phase],
+      reachedPhases: reachedPhases.map((phase) => ({
+        phase,
+        label: PHASE_LABEL_ZH[phase],
+      })),
+      switchTargets: switchTargets.map((phase) => ({
+        phase,
+        label: PHASE_LABEL_ZH[phase],
+      })),
+    };
   }
 
   async start(loopId: string): Promise<PhaseChangeEvent> {
@@ -116,6 +155,16 @@ export class PhaseService {
   ): Promise<PhaseChangeEvent> {
     const loop = await this.requireLoop(loopId);
 
+    const switchOptions = await this.getPhaseSwitchOptions(loopId);
+    if (switchOptions.currentPhase === targetPhase) {
+      throw new BadRequestException('已在目标阶段，无需切换');
+    }
+    if (!switchOptions.switchTargets.some((t) => t.phase === targetPhase)) {
+      throw new BadRequestException(
+        '无法切换到该阶段：仅可回退到本 Loop 曾到达过的更早阶段',
+      );
+    }
+
     if (!this.stateMachine.canRollback(loop.phase, targetPhase)) {
       throw new PhaseTransitionError(
         `Cannot rollback from ${loop.phase} to ${targetPhase}`,
@@ -156,6 +205,7 @@ export class PhaseService {
     }
 
     const result = this.stateMachine.rollback(loop.phase, targetPhase, reason);
+    await this.approvalRepo.deleteApprovalsFromPhaseOnwards(loopId, targetPhase);
     await this.loopRepo.updatePhase(loopId, result.toPhase);
     await this.transitionRepo.create({
       loopId,

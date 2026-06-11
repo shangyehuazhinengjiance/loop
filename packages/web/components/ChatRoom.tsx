@@ -8,7 +8,10 @@ import { ChatInput, type HumanMentionOption } from './ChatInput';
 import { LoopJoinPrompt } from './LoopJoinPrompt';
 import { LoopMembersPanel } from './LoopMembersPanel';
 import { ChatMessageBubble } from './ChatMessageBubble';
+import { ChatProcessLogGroup } from './ChatProcessLogGroup';
 import { ProcessingBanner } from './ProcessingBanner';
+import { formatLoopCreatedAt } from '../lib/chat-time';
+import { groupChatMessages } from '../lib/chat-message-groups';
 import { UserIdentityPrompt } from './UserIdentityPrompt';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
@@ -118,13 +121,18 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
-  const [rollbackPhase, setRollbackPhase] = useState('requirement');
+  const [phaseSwitchTargets, setPhaseSwitchTargets] = useState<
+    { phase: string; label: string }[]
+  >([]);
+  const [switchTargetPhase, setSwitchTargetPhase] = useState('');
   const [clientPending, setClientPending] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [agentProcessing, setAgentProcessing] = useState<string | null>(null);
   const [devConfig, setDevConfig] = useState<DevelopmentConfig | null>(null);
   const [deployConfig, setDeployConfig] = useState<DeploymentConfig | null>(null);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
+  const [loopTitle, setLoopTitle] = useState('');
+  const [loopCreatedAt, setLoopCreatedAt] = useState<string | undefined>();
   const messageListRef = useRef<HTMLDivElement>(null);
   const [externalAssigneeId, setExternalAssigneeId] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
@@ -143,6 +151,12 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       r.json(),
     );
     setPhase(loop.phase);
+    setLoopTitle(loop.title ?? '');
+    const created =
+      loop.created_at ?? loop.createdAt ?? loop.updated_at ?? loop.updatedAt;
+    setLoopCreatedAt(
+      typeof created === 'string' ? created : created?.toISOString?.(),
+    );
     setLoopStatus(loop.status ?? 'active');
     setBlocker(loop.blocker ?? null);
     setAgentProcessing(
@@ -150,6 +164,26 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     );
     setDevConfig(loop.context?.development ?? null);
     setDeployConfig(loop.context?.deployment ?? null);
+
+    try {
+      const opts = await fetch(
+        `${ORCHESTRATOR}/api/loops/${loopId}/phase/switch-options`,
+      ).then((r) => (r.ok ? r.json() : null));
+      if (opts?.switchTargets) {
+        setPhaseSwitchTargets(opts.switchTargets);
+        setSwitchTargetPhase((prev) => {
+          const phases = opts.switchTargets.map((t: { phase: string }) => t.phase);
+          if (prev && phases.includes(prev)) return prev;
+          return phases[0] ?? '';
+        });
+      } else {
+        setPhaseSwitchTargets([]);
+        setSwitchTargetPhase('');
+      }
+    } catch {
+      setPhaseSwitchTargets([]);
+      setSwitchTargetPhase('');
+    }
   }, [loopId]);
 
   const loadMembers = useCallback(async () => {
@@ -638,6 +672,16 @@ export function ChatRoom({ loopId }: { loopId: string }) {
         alert(err.message ?? `审批失败 (${res.status})`);
         return;
       }
+      const data = (await res.json()) as {
+        duplicate?: boolean;
+        retried?: boolean;
+        event?: { toPhase?: string };
+      };
+      if (data.duplicate && !data.retried && !data.event) {
+        alert(
+          '该阶段此前已审批过，流程未前进。若刚从后期回退，请部署最新 orchestrator 后重试，或再次执行回退以清除审批记录。',
+        );
+      }
       await refreshLoop();
     } finally {
       setClientPending(null);
@@ -716,21 +760,28 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     }
   }
 
-  async function rollback() {
-    if (!user || busy) return;
-    const reason = prompt('回退原因：');
-    if (!reason) return;
-    setClientPending('正在回退阶段…');
+  async function switchPhase() {
+    if (!user || busy || !switchTargetPhase) return;
+    const target = phaseSwitchTargets.find((t) => t.phase === switchTargetPhase);
+    const label = target?.label ?? switchTargetPhase;
+    const reason = prompt(`切换到「${label}」阶段的原因（必填）：`);
+    if (!reason?.trim()) return;
+    setClientPending('正在切换阶段…');
     try {
-      await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/rollback`, {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/rollback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetPhase: rollbackPhase,
-          reason,
+          targetPhase: switchTargetPhase,
+          reason: reason.trim(),
           userId: user.userId,
         }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message ?? `切换阶段失败 (${res.status})`);
+        return;
+      }
       await refreshLoop();
     } finally {
       setClientPending(null);
@@ -813,12 +864,22 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           gap: 8,
         }}
       >
-        <div>
-          <Link href="/" style={{ color: '#8b949e', fontSize: 13, marginRight: 12 }}>
-            ← 首页
-          </Link>
-          <strong>Loop</strong>{' '}
-          <span style={{ color: '#8b949e', fontSize: 13 }}>{loopId.slice(0, 8)}…</span>
+        <div className="chat-loop-header">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+            <Link href="/" style={{ color: '#8b949e', fontSize: 13, flexShrink: 0 }}>
+              ← 首页
+            </Link>
+            <strong className="chat-loop-header__title" title={loopTitle || loopId}>
+              {loopTitle || `Loop ${loopId.slice(0, 8)}…`}
+            </strong>
+          </div>
+          <div className="chat-loop-header__meta">
+            {loopCreatedAt ? (
+              <span>创建于 {formatLoopCreatedAt(loopCreatedAt)}（UTC+8）</span>
+            ) : (
+              <span style={{ color: '#6e7681' }}>{loopId.slice(0, 8)}…</span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <button
@@ -899,20 +960,27 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           <Link href={`/loop/${loopId}/replay`} style={{ fontSize: 13 }}>
             回放
           </Link>
-          <select
-            value={rollbackPhase}
-            onChange={(e) => setRollbackPhase(e.target.value)}
-            style={{
-              background: '#21262d',
-              color: '#e6edf3',
-              border: '1px solid #30363d',
-              borderRadius: 6,
-              padding: '2px 6px',
-            }}
-          >
-            <option value="requirement">requirement</option>
-            <option value="development">development</option>
-          </select>
+          {phaseSwitchTargets.length > 0 && (
+            <select
+              value={switchTargetPhase}
+              onChange={(e) => setSwitchTargetPhase(e.target.value)}
+              title="仅可选择本 Loop 曾到达过的更早阶段"
+              style={{
+                background: '#21262d',
+                color: '#e6edf3',
+                border: '1px solid #30363d',
+                borderRadius: 6,
+                padding: '2px 6px',
+                maxWidth: 140,
+              }}
+            >
+              {phaseSwitchTargets.map((t) => (
+                <option key={t.phase} value={t.phase}>
+                  {t.label}（{t.phase}）
+                </option>
+              ))}
+            </select>
+          )}
           {phase === 'done' && (
             <button
               type="button"
@@ -955,22 +1023,26 @@ export function ChatRoom({ loopId }: { loopId: string }) {
               恢复流程
             </button>
           )}
-          <button
-            onClick={rollback}
-            disabled={busy}
-            style={{
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid #f85149',
-              background: 'transparent',
-              color: busy ? '#8b949e' : '#f85149',
-              fontSize: 12,
-              cursor: busy ? 'not-allowed' : 'pointer',
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            回退
-          </button>
+          {phaseSwitchTargets.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void switchPhase()}
+              disabled={busy || !switchTargetPhase}
+              title="回退到已完成的更早阶段（不可向前跳转）"
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid #f85149',
+                background: 'transparent',
+                color: busy || !switchTargetPhase ? '#8b949e' : '#f85149',
+                fontSize: 12,
+                cursor: busy || !switchTargetPhase ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+              }}
+            >
+              确认切换阶段
+            </button>
+          )}
           <span style={{ color: connected ? '#3fb950' : '#f85149' }}>
             {connected ? '已连接' : '断开'}
           </span>
@@ -1337,10 +1409,22 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       )}
 
       <div ref={messageListRef} className="chat-msg-list">
-        {messages.map((m, index) => {
+        {groupChatMessages(messages).map((item, index, items) => {
+          const prevItem = index > 0 ? items[index - 1] : undefined;
+          const prevMessage =
+            prevItem?.kind === 'message'
+              ? prevItem.message
+              : prevItem?.kind === 'process-log'
+                ? prevItem.messages[prevItem.messages.length - 1]
+                : undefined;
+
+          if (item.kind === 'process-log') {
+            return <ChatProcessLogGroup key={item.id} messages={item.messages} />;
+          }
+
+          const m = item.message;
           const mentionsYou = Boolean(user && messageMentionsUser(m, user.userId));
           const mentionUnread = pendingMentionIds.includes(m.id);
-          const prevMessage = index > 0 ? messages[index - 1] : undefined;
 
           return (
             <ChatMessageBubble

@@ -71,6 +71,36 @@ export class ApprovalService {
       input.action,
       loop.phase,
     );
+    if (exists && input.action === 'approve_prd' && loop.phase === 'requirement') {
+      const event = await this.phaseService.approve(
+        input.loopId,
+        input.action,
+        input.approvedBy,
+        input.note,
+      );
+      if (event.toPhase === 'development') {
+        await this.developmentService.onEnterDevelopment(
+          input.loopId,
+          input.approvedBy,
+        );
+      }
+      return { duplicate: true, retried: true, action: input.action, phase: loop.phase, event };
+    }
+    if (exists && input.action === 'approve_dev' && loop.phase === 'development') {
+      const event = await this.phaseService.approve(
+        input.loopId,
+        input.action,
+        input.approvedBy,
+        input.note,
+      );
+      if (event.toPhase === 'deployment') {
+        await this.deploymentService.submitToTestBranch(
+          input.loopId,
+          input.approvedBy,
+        );
+      }
+      return { duplicate: true, retried: true, action: input.action, phase: loop.phase, event };
+    }
     if (exists && input.action !== 'approve_test') {
       return { duplicate: true, action: input.action, phase: loop.phase };
     }

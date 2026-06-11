@@ -3,7 +3,11 @@
 import type { ReactNode } from 'react';
 import { Avatar } from './Avatar';
 import { MarkdownContent } from './MarkdownContent';
-import { formatChatTimestamp, shouldShowTimeDivider } from '../lib/chat-time';
+import {
+  formatBubbleTimestamp,
+  formatChatTimestamp,
+  shouldShowTimeDivider,
+} from '../lib/chat-time';
 
 interface Action {
   id: string;
@@ -49,6 +53,7 @@ export function ChatMessageBubble({
     m.metadata?.timestamp,
   );
   const timeLabel = formatChatTimestamp(m.metadata?.timestamp);
+  const bubbleTime = formatBubbleTimestamp(m.metadata?.timestamp);
 
   const isSameSenderAsPrev =
     prevMessage &&
@@ -113,6 +118,11 @@ export function ChatMessageBubble({
               .join(' ')}
           >
             <MarkdownContent content={m.content.body} variant={markdownVariant} />
+            {bubbleTime && (
+              <div className="chat-bubble__time" aria-label={`发送于 ${bubbleTime}`}>
+                {bubbleTime}
+              </div>
+            )}
           </div>
 
           {renderActions?.(m)}
