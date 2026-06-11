@@ -1,8 +1,8 @@
 /** 合并多个 AbortSignal，任一触发则 abort */
 export function combineAbortSignals(
-  signals: (AbortSignal | undefined)[],
+  signals: (AbortSignal | null | undefined)[],
 ): AbortSignal | undefined {
-  const active = signals.filter((s): s is AbortSignal => Boolean(s));
+  const active = signals.filter((s): s is AbortSignal => s != null);
   if (active.length === 0) return undefined;
   if (active.length === 1) return active[0];
 
@@ -43,5 +43,8 @@ export function fetchWithTimeout(
 
   const signal = combineAbortSignals([outer, timeoutController.signal]);
 
-  return fetch(url, { ...rest, signal }).finally(() => clearTimeout(timer));
+  return fetch(url, {
+    ...rest,
+    ...(signal ? { signal } : {}),
+  }).finally(() => clearTimeout(timer));
 }
