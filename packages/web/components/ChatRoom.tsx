@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadUserIdentity, type UserIdentity } from '../lib/user-identity';
+import { messageMentionsUser, mentionTag } from '../lib/mentions';
 import { ChatInput, type HumanMentionOption } from './ChatInput';
 import { LoopJoinPrompt } from './LoopJoinPrompt';
 import { LoopMembersPanel } from './LoopMembersPanel';
@@ -44,7 +45,7 @@ interface Action {
 interface Message {
   id: string;
   sender: { type: string; id: string; displayName: string };
-  content: { type: string; body: string; actions?: Action[] };
+  content: { type: string; body: string; actions?: Action[]; mentions?: string[] };
   phase: string;
   metadata?: { timestamp?: string; sdkMessageType?: string };
 }
@@ -109,6 +110,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [agentProcessing, setAgentProcessing] = useState<string | null>(null);
   const [devConfig, setDevConfig] = useState<DevelopmentConfig | null>(null);
   const [deployConfig, setDeployConfig] = useState<DeploymentConfig | null>(null);
+  const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const [externalAssigneeId, setExternalAssigneeId] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -187,6 +190,14 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       }
       if (data.type === 'message' && data.message) {
         appendMessage(data.message);
+        if (
+          user &&
+          messageMentionsUser(data.message, user.userId)
+        ) {
+          setPendingMentionIds((prev) =>
+            prev.includes(data.message.id) ? prev : [...prev, data.message.id],
+          );
+        }
         void refreshLoop();
       }
       if (data.type === 'processing') {
@@ -284,6 +295,16 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   function canResolveBlocker(): boolean {
     if (!user || !blocker) return false;
     return blocker.assigneeUserId === user.userId;
+  }
+
+  function scrollToMention(messageId: string) {
+    const el = document.getElementById(`loop-msg-${messageId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setPendingMentionIds((prev) => prev.filter((id) => id !== messageId));
+  }
+
+  function dismissAllMentions() {
+    setPendingMentionIds([]);
   }
 
   function shouldOfferRecover(): boolean {
@@ -881,6 +902,59 @@ export function ChatRoom({ loopId }: { loopId: string }) {
         </div>
       )}
 
+      {user && pendingMentionIds.length > 0 && (
+        <div
+          style={{
+            padding: '10px 20px',
+            background: '#132339',
+            borderBottom: '1px solid #388bfd',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ fontSize: 14, color: '#e6edf3' }}>
+            <span className="mention-you-pill" style={{ marginRight: 8 }}>
+              {mentionTag(user.userId)}
+            </span>
+            有 <strong>{pendingMentionIds.length}</strong> 条新消息提及你
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => scrollToMention(pendingMentionIds[0]!)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: 'none',
+                background: '#388bfd',
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              查看提及
+            </button>
+            <button
+              type="button"
+              onClick={dismissAllMentions}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: '1px solid #30363d',
+                background: 'transparent',
+                color: '#8b949e',
+                fontSize: 13,
+              }}
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
+
       {blocker && loopStatus === 'blocked' && (
         <div
           style={{
@@ -1057,27 +1131,52 @@ export function ChatRoom({ loopId }: { loopId: string }) {
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        {messages.map((m) => (
-          <div key={m.id} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 4 }}>
-              {m.sender.displayName} · {m.phase}
-              {m.content.type !== 'text' && ` · ${m.content.type}`}
+      <div ref={messageListRef} style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+        {messages.map((m) => {
+          const mentionsYou = Boolean(user && messageMentionsUser(m, user.userId));
+          const mentionUnread = pendingMentionIds.includes(m.id);
+          return (
+          <div
+            key={m.id}
+            id={`loop-msg-${m.id}`}
+            style={{
+              marginBottom: 16,
+              scrollMarginTop: 80,
+            }}
+          >
+            <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>
+                {m.sender.displayName} · {m.phase}
+                {m.content.type !== 'text' && ` · ${m.content.type}`}
+              </span>
+              {mentionsYou && (
+                <span
+                  className="mention-you-pill"
+                  style={{ fontSize: 11, padding: '1px 6px' }}
+                >
+                  提及你
+                </span>
+              )}
             </div>
             <div
               style={{
                 padding: '10px 14px',
                 borderRadius: 8,
-                background:
-                  m.sender.type === 'human' && m.sender.id === user.userId
+                background: mentionsYou
+                  ? '#132339'
+                  : m.sender.type === 'human' && m.sender.id === user?.userId
                     ? '#1a2332'
                     : m.sender.type === 'human'
                       ? '#161b22'
                       : '#1c2128',
-                border:
-                  m.sender.id === user.userId
+                border: mentionUnread
+                  ? '1px solid #388bfd'
+                  : mentionsYou
                     ? '1px solid #388bfd66'
-                    : '1px solid #30363d',
+                    : m.sender.id === user?.userId
+                      ? '1px solid #388bfd66'
+                      : '1px solid #30363d',
+                boxShadow: mentionUnread ? '0 0 0 1px #388bfd44' : undefined,
               }}
             >
               <MarkdownContent content={m.content.body} />
@@ -1117,7 +1216,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                 );
               })}
           </div>
-        ))}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
