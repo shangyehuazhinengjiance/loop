@@ -144,4 +144,8 @@ export class LoopRepository {
     );
     return rows.map(mapRow);
   }
+
+  async delete(id: string): Promise<void> {
+    await dbQuery(this.pool, 'DELETE FROM loops WHERE id = ?', [id]);
+  }
 }
