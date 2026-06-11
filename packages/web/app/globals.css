@@ -131,3 +131,203 @@ button {
   font-weight: 600;
   color: #f0f6fc;
 }
+
+/* -------------------------------------------------------------------------- */
+/* 微信风格聊天气泡（PRD：loop f57aff60）                                      */
+/* -------------------------------------------------------------------------- */
+
+.chat-msg-list {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 12px 20px;
+  background: #0d1117;
+}
+
+.chat-time-divider {
+  text-align: center;
+  font-size: 12px;
+  color: #8b949e;
+  margin: 12px 0 8px;
+  user-select: none;
+}
+
+.chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.chat-row--self {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
+.chat-row--other {
+  flex-direction: row;
+  justify-content: flex-start;
+}
+
+.chat-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: min(80%, 640px);
+}
+
+.chat-col--self {
+  align-items: flex-end;
+}
+
+.chat-col--other {
+  align-items: flex-start;
+}
+
+.chat-sender-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8b949e;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+
+.chat-bubble {
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-width: 100%;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.chat-bubble--self {
+  background: #95ec69;
+  color: #1a1a1a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.chat-bubble--other {
+  background: #ffffff;
+  color: #1a1a1a;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.chat-bubble--mention {
+  box-shadow: 0 0 0 1px rgba(56, 139, 253, 0.55);
+}
+
+.chat-bubble--unread {
+  box-shadow: 0 0 0 2px rgba(56, 139, 253, 0.65);
+}
+
+.chat-progress-card {
+  margin: 8px auto;
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px dashed #30363d;
+  background: #161b22;
+  font-size: 13px;
+  color: #8b949e;
+}
+
+.chat-msg--progress {
+  margin-bottom: 8px;
+}
+
+.chat-action-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 气泡内 Markdown：自己（绿底） */
+.markdown-body--bubble-self {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #1a1a1a;
+}
+
+.markdown-body--bubble-self strong {
+  color: #111;
+}
+
+.markdown-body--bubble-self a {
+  color: #0b5cab;
+}
+
+.markdown-body--bubble-self code {
+  background: rgba(0, 0, 0, 0.08);
+  border: none;
+  color: #1a1a1a;
+}
+
+.markdown-body--bubble-self pre {
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown-body--bubble-self pre code {
+  color: #1a1a1a;
+}
+
+.markdown-body--bubble-self blockquote {
+  background: rgba(0, 0, 0, 0.05);
+  border-left-color: rgba(0, 0, 0, 0.2);
+  color: #333;
+}
+
+/* 气泡内 Markdown：他人（白底） */
+.markdown-body--bubble-other {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #1a1a1a;
+}
+
+.markdown-body--bubble-other strong {
+  color: #111;
+}
+
+.markdown-body--bubble-other a {
+  color: #0b5cab;
+  word-break: break-all;
+}
+
+.markdown-body--bubble-other code {
+  background: #f3f4f6;
+  border: none;
+  color: #1f2937;
+}
+
+.markdown-body--bubble-other pre {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown-body--bubble-other pre code {
+  color: #1f2937;
+}
+
+.markdown-body--bubble-other blockquote {
+  background: #f9fafb;
+  border-left-color: #9ca3af;
+  color: #4b5563;
+}
+
+.markdown-body--progress {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #8b949e;
+}
+
+.markdown-body--progress strong {
+  color: #c9d1d9;
+}
