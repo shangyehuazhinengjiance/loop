@@ -27,6 +27,9 @@ import { LoopService } from './loop.service.js';
 import { PhaseService } from '../phase/phase.service.js';
 import { AgentRunnerService } from '../agent/agent-runner.service.js';
 import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
+import { DevelopmentService } from '../development/development.service.js';
+import { LoopEntryService } from '../requirements/loop-entry.service.js';
+import type { DevelopmentMode } from '@loop/shared';
 
 @Controller('api')
 export class LoopController {
@@ -44,6 +47,8 @@ export class LoopController {
     private readonly blockerService: BlockerService,
     private readonly agentRunner: AgentRunnerService,
     private readonly codebaseSummary: CodebaseSummaryService,
+    private readonly developmentService: DevelopmentService,
+    private readonly loopEntryService: LoopEntryService,
   ) {}
 
   @Get('projects')
@@ -208,12 +213,14 @@ export class LoopController {
     if (!body.userId || !body.displayName?.trim()) {
       throw new BadRequestException('userId and displayName required');
     }
-    return this.memberService.join({
+    const member = await this.memberService.join({
       loopId: id,
       userId: body.userId,
       displayName: body.displayName.trim(),
       bio: body.bio ?? '',
     });
+    void this.loopEntryService.onMemberJoined(id, body.userId);
+    return member;
   }
 
   @Post('loops/:id/blocker/resolve')
@@ -258,13 +265,56 @@ export class LoopController {
     @Param('id') id: string,
     @Body() body: { targetPhase: Phase; reason: string; snapshotId?: string; userId?: string },
   ) {
-    return this.phaseService.rollback(
+    const event = await this.phaseService.rollback(
       id,
       body.targetPhase,
       body.reason,
       body.userId ?? 'human',
       body.snapshotId,
     );
+    if (event.toPhase === 'development') {
+      const prdBy = await this.developmentService.getPrdApprovedBy(id);
+      if (prdBy) {
+        await this.developmentService.onEnterDevelopment(id, prdBy, {
+          reprompt: true,
+        });
+      }
+    }
+    return event;
+  }
+
+  @Post('loops/:id/development/mode')
+  async selectDevelopmentMode(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      mode: DevelopmentMode;
+      userId: string;
+      assigneeUserId?: string;
+    },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    await this.developmentService.selectMode({
+      loopId: id,
+      mode: body.mode,
+      userId: body.userId,
+      assigneeUserId: body.assigneeUserId,
+    });
+    return { ok: true, mode: body.mode };
+  }
+
+  @Post('loops/:id/development/complete')
+  async completeExternalDevelopment(
+    @Param('id') id: string,
+    @Body() body: { userId: string; note?: string },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    await this.developmentService.completeExternal({
+      loopId: id,
+      userId: body.userId,
+      note: body.note,
+    });
+    return { ok: true };
   }
 
   @Post('loops/:id/approve')

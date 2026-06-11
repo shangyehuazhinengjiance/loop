@@ -39,8 +39,16 @@ export interface LoopMember {
 export type ApprovalActionType =
   | 'approve_prd'
   | 'approve_dev'
+  | 'confirm_mr_merged'
   | 'approve_deploy'
   | 'rollback';
+
+/** 群聊内交互按钮（含审批与开发模式选择） */
+export type LoopInteractiveAction =
+  | ApprovalActionType
+  | 'select_dev_mode_agent'
+  | 'select_dev_mode_external'
+  | 'complete_external_dev';
 
 export type TransitionTrigger =
   | 'start'
@@ -74,13 +82,53 @@ export interface Task {
   assigneeDisplayName?: string;
 }
 
+export type DeploymentStep = 'awaiting_mr_merge' | 'awaiting_pipeline';
+
+export interface MergeRequestInfo {
+  url: string;
+  number: number;
+  headBranch: string;
+  baseBranch: string;
+  provider: 'github' | 'gitlab';
+  createdAt: string;
+}
+
 export interface DeploymentInfo {
   stagingUrl?: string;
   productionUrl?: string;
   status: 'pending' | 'staging' | 'production' | 'failed';
-  /** 部署推送目标分支（默认 test） */
+  /** 部署目标分支（默认 test） */
   targetBranch?: string;
   commitSha?: string;
+  /** deployment 子步骤 */
+  step?: DeploymentStep;
+  mergeRequest?: MergeRequestInfo;
+  mergeAssigneeUserId?: string;
+  mergeAssigneeDisplayName?: string;
+  mrMergedAt?: string;
+  mrMergedBy?: string;
+}
+
+export type DevelopmentMode = 'agent' | 'external';
+
+export interface ExternalDevelopmentInfo {
+  assigneeUserId: string;
+  assigneeDisplayName: string;
+  prdCommitSha?: string;
+  prdPushedAt?: string;
+  handoffAt?: string;
+  completedAt?: string;
+  completedBy?: string;
+  targetBranch: string;
+}
+
+/** development 阶段子状态（顶层 phase 仍为 development） */
+export interface DevelopmentConfig {
+  /** 未设置 = 等待 PRD 确认人选择开发模式 */
+  mode?: DevelopmentMode;
+  /** 确认 PRD 的成员 userId，仅此用户可选择开发模式 */
+  prdApprovedBy?: string;
+  external?: ExternalDevelopmentInfo;
 }
 
 export interface LoopContext {
@@ -90,6 +138,7 @@ export interface LoopContext {
   devSessionId?: string;
   opsSessionId?: string;
   deployment?: DeploymentInfo;
+  development?: DevelopmentConfig;
 }
 
 export interface LoopGitConfig {
@@ -175,7 +224,7 @@ export type MessageContentType =
 export interface Action {
   id: string;
   label: string;
-  action: ApprovalActionType;
+  action: LoopInteractiveAction;
   resolved?: boolean;
   resolvedBy?: string;
   resolvedAt?: string;

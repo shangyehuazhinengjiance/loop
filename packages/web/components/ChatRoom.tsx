@@ -17,13 +17,18 @@ const ORCHESTRATOR =
 const ACTION_REQUIRED_PHASE: Record<string, string> = {
   approve_prd: 'requirement',
   approve_dev: 'development',
+  confirm_mr_merged: 'deployment',
   approve_deploy: 'deployment',
 };
 
 const APPROVE_PENDING_LABEL: Record<string, string> = {
   approve_prd: '正在确认 PRD…',
   approve_dev: '正在提交开发验收…',
+  confirm_mr_merged: '正在确认 MR 合并…',
   approve_deploy: '正在确认流水线完成…',
+  select_dev_mode_agent: '正在启动 Dev Agent…',
+  select_dev_mode_external: '正在发布 PRD 并交接…',
+  complete_external_dev: '正在提交开发完成…',
 };
 
 interface Action {
@@ -55,6 +60,23 @@ interface LoopMember {
   bio: string;
 }
 
+interface DevelopmentConfig {
+  mode?: 'agent' | 'external';
+  prdApprovedBy?: string;
+  external?: {
+    assigneeUserId: string;
+    assigneeDisplayName: string;
+    targetBranch?: string;
+  };
+}
+
+interface DeploymentConfig {
+  step?: 'awaiting_mr_merge' | 'awaiting_pipeline';
+  mergeRequest?: { url: string; number: number; headBranch?: string; baseBranch?: string };
+  mergeAssigneeUserId?: string;
+  targetBranch?: string;
+}
+
 export function ChatRoom({ loopId }: { loopId: string }) {
   const [user, setUser] = useState<UserIdentity | null>(null);
   const [identityLoaded, setIdentityLoaded] = useState(false);
@@ -74,6 +96,9 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [clientPending, setClientPending] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [agentProcessing, setAgentProcessing] = useState<string | null>(null);
+  const [devConfig, setDevConfig] = useState<DevelopmentConfig | null>(null);
+  const [deployConfig, setDeployConfig] = useState<DeploymentConfig | null>(null);
+  const [externalAssigneeId, setExternalAssigneeId] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const busy = Boolean(clientPending || sending || agentProcessing);
@@ -95,6 +120,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     setAgentProcessing(
       loop.processing?.active && loop.processing.label ? loop.processing.label : null,
     );
+    setDevConfig(loop.context?.development ?? null);
+    setDeployConfig(loop.context?.deployment ?? null);
   }, [loopId]);
 
   const loadMembers = useCallback(async () => {
@@ -123,6 +150,14 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     if (!user) return;
     void checkMembership();
   }, [user, checkMembership]);
+
+  useEffect(() => {
+    if (!externalAssigneeId && members.length > 0) {
+      const hinted =
+        members.find((m) => /开发|前端|后端|全栈|编程/i.test(m.bio)) ?? members[0];
+      setExternalAssigneeId(hinted.userId);
+    }
+  }, [members, externalAssigneeId]);
 
   useEffect(() => {
     if (!user || !joined) return;
@@ -193,35 +228,135 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return lastDevResult?.id === message.id;
   }
 
+  function isLatestModeSelectionMessage(message: Message): boolean {
+    const last = [...messages]
+      .reverse()
+      .find((m) =>
+        m.content.actions?.some((a) => a.action.startsWith('select_dev_mode_')),
+      );
+    return last?.id === message.id;
+  }
+
+  function isLatestExternalHandoffMessage(message: Message): boolean {
+    const last = [...messages]
+      .reverse()
+      .find((m) =>
+        m.content.actions?.some((a) => a.action === 'complete_external_dev'),
+      );
+    return last?.id === message.id;
+  }
+
+  function canSelectDevMode(): boolean {
+    return Boolean(user && devConfig?.prdApprovedBy === user.userId && !devConfig?.mode);
+  }
+
+  function canCompleteExternalDev(): boolean {
+    return Boolean(
+      user &&
+        devConfig?.mode === 'external' &&
+        devConfig.external?.assigneeUserId === user.userId,
+    );
+  }
+
+  function canConfirmMrMerged(): boolean {
+    return Boolean(
+      user &&
+        deployConfig?.step === 'awaiting_mr_merge' &&
+        deployConfig.mergeAssigneeUserId === user.userId,
+    );
+  }
+
+  function isLatestMrMergeMessage(message: Message): boolean {
+    const last = [...messages]
+      .reverse()
+      .find((m) =>
+        m.content.actions?.some((a) => a.action === 'confirm_mr_merged'),
+      );
+    return last?.id === message.id;
+  }
+
+  function isLatestPipelineMessage(message: Message): boolean {
+    const last = [...messages]
+      .reverse()
+      .find((m) =>
+        m.content.actions?.some((a) => a.action === 'approve_deploy'),
+      );
+    return last?.id === message.id;
+  }
+
   /** 展示审批按钮（含不可用态，避免「文案让点但按钮消失」） */
   function shouldShowAction(action: string, message: Message): boolean {
+    if (action === 'select_dev_mode_agent' || action === 'select_dev_mode_external') {
+      if (!devConfig || devConfig.mode) return false;
+      return isLatestModeSelectionMessage(message);
+    }
+    if (action === 'complete_external_dev') {
+      if (devConfig?.mode !== 'external' || phase !== 'development') return false;
+      return isLatestExternalHandoffMessage(message);
+    }
     if (action === 'approve_dev') {
+      if (devConfig?.mode === 'external') return false;
       if (!message.content.actions?.some((a) => a.action === 'approve_dev')) {
         return false;
       }
       return isLatestDevApproveMessage(message);
+    }
+    if (action === 'confirm_mr_merged') {
+      if (deployConfig?.step !== 'awaiting_mr_merge') return false;
+      return isLatestMrMergeMessage(message);
     }
     if (!isActionAvailable(action)) return false;
     if (action === 'approve_prd') {
       return message.content.type === 'artifact';
     }
     if (action === 'approve_deploy') {
+      if (deployConfig?.step !== 'awaiting_pipeline') return false;
       if (message.content.type !== 'artifact') return false;
-      const lastDeploy = [...messages]
-        .reverse()
-        .find((m) =>
-          m.content.actions?.some((a) => a.action === 'approve_deploy'),
-        );
-      return lastDeploy?.id === message.id;
+      return isLatestPipelineMessage(message);
     }
     return true;
   }
 
   function isActionClickable(action: string): boolean {
+    if (action === 'select_dev_mode_agent' || action === 'select_dev_mode_external') {
+      return canSelectDevMode();
+    }
+    if (action === 'complete_external_dev') {
+      return canCompleteExternalDev();
+    }
+    if (action === 'confirm_mr_merged') {
+      return canConfirmMrMerged();
+    }
+    if (action === 'approve_deploy') {
+      return deployConfig?.step === 'awaiting_pipeline';
+    }
     return isActionAvailable(action);
   }
 
   function actionDisabledHint(action: string): string | undefined {
+    if (action === 'select_dev_mode_agent' || action === 'select_dev_mode_external') {
+      if (!canSelectDevMode()) {
+        return devConfig?.mode
+          ? '开发模式已选择'
+          : '仅 PRD 确认人可选择开发方式';
+      }
+      return undefined;
+    }
+    if (action === 'complete_external_dev') {
+      if (!canCompleteExternalDev()) {
+        return '仅被指派的开发负责人可确认完成';
+      }
+      return undefined;
+    }
+    if (action === 'confirm_mr_merged') {
+      if (!canConfirmMrMerged()) {
+        return '仅被指派的合并负责人可确认 MR 已合并';
+      }
+      return undefined;
+    }
+    if (action === 'approve_deploy' && deployConfig?.step !== 'awaiting_pipeline') {
+      return '请先完成 MR 合并并确认';
+    }
     if (!isActionAvailable(action)) {
       const required = ACTION_REQUIRED_PHASE[action];
       if (required) {
@@ -229,6 +364,70 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       }
     }
     return undefined;
+  }
+
+  async function selectDevMode(mode: 'agent' | 'external') {
+    if (!user || !canSelectDevMode()) return;
+    setClientPending(
+      mode === 'agent'
+        ? APPROVE_PENDING_LABEL.select_dev_mode_agent
+        : APPROVE_PENDING_LABEL.select_dev_mode_external,
+    );
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/development/mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode,
+          userId: user.userId,
+          assigneeUserId: mode === 'external' ? externalAssigneeId || undefined : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message ?? `选择开发模式失败 (${res.status})`);
+        return;
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
+    }
+  }
+
+  async function completeExternalDev() {
+    if (!user || !canCompleteExternalDev()) return;
+    setClientPending(APPROVE_PENDING_LABEL.complete_external_dev);
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/development/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.userId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message ?? `确认失败 (${res.status})`);
+        return;
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
+    }
+  }
+
+  async function handleAction(action: string) {
+    if (action === 'select_dev_mode_agent') {
+      await selectDevMode('agent');
+      return;
+    }
+    if (action === 'select_dev_mode_external') {
+      await selectDevMode('external');
+      return;
+    }
+    if (action === 'complete_external_dev') {
+      await completeExternalDev();
+      return;
+    }
+    await approve(action);
   }
 
   async function approve(action: string) {
@@ -405,6 +604,10 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             }}
           >
             {phase}
+            {devConfig?.mode === 'agent' ? ' · Dev Agent' : ''}
+            {devConfig?.mode === 'external' ? ' · 外部工具' : ''}
+            {deployConfig?.step === 'awaiting_mr_merge' ? ' · 待合并 MR' : ''}
+            {deployConfig?.step === 'awaiting_pipeline' ? ' · 待跑流水线' : ''}
             {loopStatus === 'blocked' ? ' · 阻塞中' : ''}
           </span>
           <button
@@ -463,6 +666,86 @@ export function ChatRoom({ loopId }: { loopId: string }) {
 
       {statusLabel && <ProcessingBanner label={statusLabel} />}
 
+      {phase === 'development' && !devConfig?.mode && devConfig?.prdApprovedBy && (
+        <div
+          style={{
+            padding: '12px 20px',
+            background: '#132339',
+            borderBottom: '1px solid #388bfd66',
+            fontSize: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>请选择开发方式</strong>
+          <span style={{ color: '#8b949e', marginLeft: 8, fontSize: 13 }}>
+            {canSelectDevMode()
+              ? '（您是 PRD 确认人）'
+              : `（等待 PRD 确认人操作）`}
+          </span>
+          {canSelectDevMode() && (
+            <div
+              style={{
+                marginTop: 10,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void selectDevMode('agent')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #238636',
+                  background: 'transparent',
+                  color: '#3fb950',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Loop 内 Dev Agent
+              </button>
+              <select
+                value={externalAssigneeId}
+                onChange={(e) => setExternalAssigneeId(e.target.value)}
+                disabled={busy}
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  border: '1px solid #30363d',
+                  background: '#21262d',
+                  color: '#e6edf3',
+                  fontSize: 13,
+                }}
+              >
+                {members.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.displayName} ({m.userId})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={busy || !externalAssigneeId}
+                onClick={() => void selectDevMode('external')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #388bfd',
+                  background: 'transparent',
+                  color: '#58a6ff',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                外部工具开发
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {blocker && loopStatus === 'blocked' && (
         <div
           style={{
@@ -478,24 +761,49 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           {blocker.question && (
             <div style={{ color: '#8b949e', marginTop: 4 }}>{blocker.question}</div>
           )}
-          <button
-            type="button"
-            onClick={resolveBlocker}
-            disabled={busy}
-            style={{
-              marginTop: 8,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: '1px solid #9e6a03',
-              background: '#238636',
-              color: '#fff',
-              fontSize: 13,
-              cursor: busy ? 'not-allowed' : 'pointer',
-              opacity: busy ? 0.7 : 1,
-            }}
-          >
-            {clientPending === '正在解除阻塞…' ? '处理中…' : '已解决，解除阻塞'}
-          </button>
+          {blocker.kind === 'external' ? (
+            <div style={{ color: '#8b949e', marginTop: 8, fontSize: 13 }}>
+              请在下方交接消息中由开发负责人点击「开发完成，进入部署」。
+              {devConfig?.external?.targetBranch && (
+                <span> 分支：{devConfig.external.targetBranch}</span>
+              )}
+            </div>
+          ) : blocker.kind === 'human_decision' && phase === 'deployment' ? (
+            <div style={{ color: '#8b949e', marginTop: 8, fontSize: 13 }}>
+              请在 Git 平台合并 MR 后，由合并负责人在下方点击「MR 已合并」。
+              {deployConfig?.mergeRequest?.url && (
+                <div style={{ marginTop: 4 }}>
+                  <a
+                    href={deployConfig.mergeRequest.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#58a6ff' }}
+                  >
+                    打开 MR #{deployConfig.mergeRequest.number}
+                  </a>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={resolveBlocker}
+              disabled={busy}
+              style={{
+                marginTop: 8,
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: '1px solid #9e6a03',
+                background: '#238636',
+                color: '#fff',
+                fontSize: 13,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {clientPending === '正在解除阻塞…' ? '处理中…' : '已解决，解除阻塞'}
+            </button>
+          )}
         </div>
       )}
 
@@ -533,7 +841,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                   <div key={a.id} style={{ marginTop: 8 }}>
                     <button
                       type="button"
-                      onClick={() => clickable && !busy && approve(a.action)}
+                      onClick={() => clickable && !busy && void handleAction(a.action)}
                       disabled={!clickable || busy}
                       title={hint}
                       style={{

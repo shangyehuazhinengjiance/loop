@@ -17,6 +17,7 @@ import { GitService } from '../git/git.service.js';
 import { ArtifactService } from '../artifact/artifact.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import { DeploymentService } from '../deployment/deployment.service.js';
+import { RequirementsSummaryService } from '../requirements/requirements-summary.service.js';
 
 export interface PhaseChangeEvent {
   loopId: string;
@@ -40,6 +41,7 @@ export class PhaseService {
     private readonly artifactService: ArtifactService,
     private readonly auditService: AuditService,
     private readonly deploymentService: DeploymentService,
+    private readonly requirementsSummary: RequirementsSummaryService,
   ) {}
 
   getStateMachine(): PhaseStateMachine {
@@ -89,6 +91,10 @@ export class PhaseService {
 
     if (action === 'approve_dev' && event.toPhase === 'deployment') {
       await this.deploymentService.submitToTestBranch(loopId, approvedBy);
+    }
+
+    if (action === 'approve_deploy' && event.toPhase === 'done') {
+      void this.requirementsSummary.finalizeLoop(loopId, approvedBy);
     }
 
     return event;

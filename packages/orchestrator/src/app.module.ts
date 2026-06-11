@@ -27,8 +27,13 @@ import { CodebaseSummaryService } from './codebase/codebase-summary.service.js';
 import { WorkspaceJobService } from './workspace/workspace-job.service.js';
 import { BlockerService } from './blocker/blocker.service.js';
 import { DeploymentService } from './deployment/deployment.service.js';
+import { MergeRequestService } from './git/merge-request.service.js';
 import { LoopMemberService } from './member/loop-member.service.js';
 import { LoopMemberRepository } from './db/repositories/loop-member.repository.js';
+import { PrdPublishService } from './development/prd-publish.service.js';
+import { DevelopmentService } from './development/development.service.js';
+import { RequirementsSummaryService } from './requirements/requirements-summary.service.js';
+import { LoopEntryService } from './requirements/loop-entry.service.js';
 
 @Module({
   controllers: [LoopController, AgentController, ChatSseController],
@@ -60,6 +65,11 @@ import { LoopMemberRepository } from './db/repositories/loop-member.repository.j
     LoopMemberService,
     BlockerService,
     DeploymentService,
+    MergeRequestService,
+    PrdPublishService,
+    DevelopmentService,
+    RequirementsSummaryService,
+    LoopEntryService,
   ],
 })
 export class AppModule {}

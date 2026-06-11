@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 export interface AgentActivateEvent {
   loopId: string;
   agent: AgentRole;
-  reason: 'phase_entry' | 'mention' | 'rollback' | 'manual';
+  reason: 'phase_entry' | 'loop_entry' | 'mention' | 'rollback' | 'manual';
   userId?: string;
 }
 

@@ -17,6 +17,7 @@ import { ProjectRepository } from '../db/repositories/project.repository.js';
 import { ModelRouter } from '../model/model-router.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
 import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
+import { RequirementsSummaryService } from '../requirements/requirements-summary.service.js';
 import { LoopMemberService } from '../member/loop-member.service.js';
 import { AgentCoordinator, type AgentActivateEvent } from './agent-coordinator.js';
 import type { LoopRow } from '../db/repositories/loop.repository.js';
@@ -35,6 +36,7 @@ export class AgentRunnerService implements OnModuleInit {
     private readonly chatService: ChatService,
     private readonly sandbox: SandboxService,
     private readonly codebaseSummary: CodebaseSummaryService,
+    private readonly requirementsSummary: RequirementsSummaryService,
     private readonly memberService: LoopMemberService,
   ) {}
 
@@ -194,10 +196,24 @@ export class AgentRunnerService implements OnModuleInit {
     };
 
     if (agent === 'pm') {
+      const allMessages = await this.chatService.listMessages(loopId);
+      const humanCount = allMessages.filter((m) => m.sender.type === 'human').length;
+      const projectRequirementsSummary =
+        await this.requirementsSummary.readProjectSummary(loop.project_id);
+      const isLoopEntry =
+        loop.phase === 'requirement' &&
+        !loop.context.prd &&
+        humanCount === 0 &&
+        (event.reason === 'phase_entry' || event.reason === 'loop_entry');
+
       console.info(
-        `[agent-runner] pm start loop=${loopId} runtime=${model.runtime} model=${model.model}`,
+        `[agent-runner] pm start loop=${loopId} runtime=${model.runtime} model=${model.model} entry=${isLoopEntry}`,
       );
-      await runPmAgent(common);
+      await runPmAgent({
+        ...common,
+        projectRequirementsSummary: projectRequirementsSummary ?? undefined,
+        isLoopEntry,
+      });
       return;
     }
 
@@ -210,6 +226,32 @@ export class AgentRunnerService implements OnModuleInit {
           content: {
             type: 'text',
             body: `Dev Agent 仅在 **development** 阶段工作。当前阶段为 \`${loop.phase}\`，请使用顶部「回退」到 development 后再 @dev-agent。`,
+          },
+        });
+        return;
+      }
+      const devMode = loop.context.development?.mode;
+      if (devMode === 'external') {
+        const assignee = loop.context.development?.external?.assigneeDisplayName ?? '负责人';
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: `当前为 **外部工具开发** 模式，由 @${assignee} 在外部完成。Dev Agent 不会自动运行；完成后由负责人点击「开发完成，进入部署」。`,
+          },
+        });
+        return;
+      }
+      if (!devMode) {
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: '请先由 **PRD 确认人** 在上方选择开发方式（Loop 内 Dev Agent 或外部工具），再 @dev-agent。',
           },
         });
         return;

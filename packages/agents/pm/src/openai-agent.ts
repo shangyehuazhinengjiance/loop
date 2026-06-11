@@ -45,6 +45,7 @@ export async function runPmAgentOpenAI(input: {
   triggeredByUserId?: string;
   model: ResolvedModelConfig;
   signal?: AbortSignal;
+  isLoopEntry?: boolean;
 }): Promise<void> {
   const url = chatCompletionsUrl(input.model.baseUrl!);
   const system = [
@@ -151,6 +152,15 @@ export async function runPmAgentOpenAI(input: {
         preferUserId: input.triggeredByUserId,
         debug: summarizeOpenAIResponse(data),
       },
+    );
+    return;
+  }
+
+  if (input.isLoopEntry) {
+    await input.api.postAgentMessage(
+      input.loopId,
+      { type: 'text', body: text },
+      input.phase,
     );
     return;
   }

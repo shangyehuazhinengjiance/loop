@@ -1,7 +1,9 @@
 import type { ApprovalActionType } from '@loop/shared';
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, forwardRef } from '@nestjs/common';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
+import { DevelopmentService } from '../development/development.service.js';
+import { DeploymentService } from '../deployment/deployment.service.js';
 import { PhaseService } from '../phase/phase.service.js';
 
 const ACTION_REQUIRED_PHASE: Record<
@@ -10,6 +12,7 @@ const ACTION_REQUIRED_PHASE: Record<
 > = {
   approve_prd: 'requirement',
   approve_dev: 'development',
+  confirm_mr_merged: 'deployment',
   approve_deploy: 'deployment',
 };
 
@@ -19,6 +22,9 @@ export class ApprovalService {
     private readonly approvalRepo: ApprovalRepository,
     private readonly loopRepo: LoopRepository,
     private readonly phaseService: PhaseService,
+    @Inject(forwardRef(() => DevelopmentService))
+    private readonly developmentService: DevelopmentService,
+    private readonly deploymentService: DeploymentService,
   ) {}
 
   async approve(input: {
@@ -50,6 +56,22 @@ export class ApprovalService {
       return { duplicate: true, action: input.action, phase: loop.phase };
     }
 
+    if (input.action === 'confirm_mr_merged') {
+      await this.approvalRepo.create({
+        loopId: input.loopId,
+        action: input.action,
+        approvedBy: input.approvedBy,
+        phase: loop.phase,
+        note: input.note,
+      });
+      await this.deploymentService.confirmMrMerged({
+        loopId: input.loopId,
+        userId: input.approvedBy,
+        note: input.note,
+      });
+      return { duplicate: false, action: input.action, phase: loop.phase };
+    }
+
     await this.approvalRepo.create({
       loopId: input.loopId,
       action: input.action,
@@ -64,6 +86,13 @@ export class ApprovalService {
       input.approvedBy,
       input.note,
     );
+
+    if (input.action === 'approve_prd' && event.toPhase === 'development') {
+      await this.developmentService.onEnterDevelopment(
+        input.loopId,
+        input.approvedBy,
+      );
+    }
 
     return { duplicate: false, event };
   }

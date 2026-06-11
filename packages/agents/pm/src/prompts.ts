@@ -17,8 +17,38 @@ export function buildPMUserPrompt(input: {
   existingPrd?: string;
   chatHistory?: string;
   memberRoster?: string;
+  projectRequirementsSummary?: string;
+  isLoopEntry?: boolean;
 }): string {
-  const parts = [`## 用户需求\n${input.requirement}`];
+  const parts: string[] = [];
+
+  if (input.projectRequirementsSummary) {
+    parts.push(
+      `## 项目需求文档总结（历史 Loop 累积，请先阅读并理解）\n${input.projectRequirementsSummary}`,
+    );
+  } else {
+    parts.push(
+      '## 项目需求文档总结\n（尚无历史总结，这是本项目的首个或早期 Loop。）',
+    );
+  }
+
+  if (input.isLoopEntry) {
+    parts.push(
+      [
+        '## 本回合任务（进入 Loop）',
+        '',
+        '你正在欢迎成员进入本 Loop。请：',
+        '1. 用 3–5 句话说明你对**项目需求文档总结**的理解（若无总结则说明这是新 Loop）',
+        '2. 简要介绍本 Loop 当前阶段（需求收集）',
+        '3. 邀请用户在群聊中描述**本 Loop 要做的事**',
+        '',
+        '**暂不要**输出完整 PRD 或任务列表，也不要提示点击「确认需求」。等待用户补充需求后再产出 PRD。',
+      ].join('\n'),
+    );
+    return parts.join('\n\n');
+  }
+
+  parts.push(`## 用户需求\n${input.requirement}`);
   if (input.memberRoster) {
     parts.push(`## Loop 成员（可指派任务负责人或 request_human_help）\n${input.memberRoster}`);
   }
@@ -28,6 +58,8 @@ export function buildPMUserPrompt(input: {
   if (input.chatHistory) {
     parts.push(`## 群聊上下文\n${input.chatHistory}`);
   }
-  parts.push('请产出 PRD 和任务拆解。');
+  parts.push(
+    '请结合**项目需求文档总结**与用户需求，产出 PRD 和任务拆解。',
+  );
   return parts.join('\n\n');
 }
