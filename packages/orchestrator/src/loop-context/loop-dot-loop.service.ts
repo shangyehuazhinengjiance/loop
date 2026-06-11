@@ -12,7 +12,7 @@ import {
   type LoopDotLoopBundle,
   type ProjectModelConfig,
 } from '@loop/shared';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ChatService } from '../chat/chat.service.js';
@@ -48,6 +48,8 @@ const DEFAULT_MEMORY = `# 用户偏好与重要信息
 
 @Injectable()
 export class LoopDotLoopService {
+  private readonly syncing = new Set<string>();
+
   constructor(
     private readonly loopRepo: LoopRepository,
     private readonly projectRepo: ProjectRepository,
@@ -109,40 +111,80 @@ export class LoopDotLoopService {
     return loopDotBundleToPrompt(bundle);
   }
 
+  /** 手动重试 .loop 知识库同步（仅 done 阶段） */
+  async retrySync(
+    loopId: string,
+    requestedBy: string,
+  ): Promise<{ started: boolean; message: string }> {
+    if (!this.isEnabled()) {
+      throw new BadRequestException('LOOP_DOT_LOOP_ENABLED 已关闭');
+    }
+
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) throw new NotFoundException('Loop not found');
+    if (loop.phase !== 'done') {
+      throw new BadRequestException('仅 done 阶段的 Loop 可重试 .loop 知识库同步');
+    }
+    if (!loop.workspace_path) {
+      throw new BadRequestException('Loop 工作区不存在，无法同步 .loop');
+    }
+
+    if (this.syncing.has(loopId)) {
+      return { started: false, message: '同步正在进行中，请稍候' };
+    }
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: 'done',
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: `已收到 **.loop 知识库同步重试**请求（by \`${requestedBy}\`），正在重新更新四个文件并创建 MR…`,
+      },
+    });
+
+    void this.finalizeOnLoopComplete(loopId, requestedBy);
+    return { started: true, message: '已开始重试 .loop 知识库同步' };
+  }
+
   /** Loop 完成（线上验证通过）后：更新 .loop、提交、创建 MR */
   async finalizeOnLoopComplete(
     loopId: string,
     completedBy?: string,
   ): Promise<void> {
     if (!this.isEnabled()) return;
-
-    const loop = await this.loopRepo.findById(loopId);
-    if (!loop?.workspace_path) return;
-
-    const project = await this.projectRepo.findById(loop.project_id);
-    if (!project) return;
-
-    const gitConfig = project.git_config as { remoteUrl?: string } | undefined;
-    if (!gitConfig?.remoteUrl) {
-      await this.chatService.publishAgentMessage({
-        loopId,
-        phase: 'done',
-        agentId: 'orchestrator',
-        content: {
-          type: 'text',
-          body: '未配置 Git 远程仓库，已跳过 `.loop` 知识库更新与 MR。',
-        },
-      });
+    if (this.syncing.has(loopId)) {
+      console.info(`[loop-dot-loop] skip ${loopId}: sync already running`);
       return;
     }
-
-    this.chatService.emitProcessing({
-      loopId,
-      active: true,
-      label: '正在更新 .loop 项目知识库…',
-    });
+    this.syncing.add(loopId);
 
     try {
+      const loop = await this.loopRepo.findById(loopId);
+      if (!loop?.workspace_path) return;
+
+      const project = await this.projectRepo.findById(loop.project_id);
+      if (!project) return;
+
+      const gitConfig = project.git_config as { remoteUrl?: string } | undefined;
+      if (!gitConfig?.remoteUrl) {
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase: 'done',
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: '未配置 Git 远程仓库，已跳过 `.loop` 知识库更新与 MR。',
+          },
+        });
+        return;
+      }
+
+      this.chatService.emitProcessing({
+        loopId,
+        active: true,
+        label: '正在更新 .loop 项目知识库…',
+      });
       await this.progress.publish({
         loopId,
         phase: 'done',
@@ -293,10 +335,11 @@ export class LoopDotLoopService {
         agentId: 'orchestrator',
         content: {
           type: 'text',
-          body: `**.loop 知识库更新失败**（${msg}）。Loop 已完成，可人工维护 \`.loop/\` 下四个文件后提交。`,
+          body: `**.loop 知识库更新失败**（${msg}）。Loop 已完成，可点击顶部「重试 .loop 同步」再次执行，或人工维护 \`.loop/\` 下四个文件后提交。`,
         },
       });
     } finally {
+      this.syncing.delete(loopId);
       this.chatService.emitProcessing({ loopId, active: false });
     }
   }
