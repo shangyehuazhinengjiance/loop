@@ -328,18 +328,47 @@ export default function HomePage() {
                             {loop.phase} · {loop.status}
                           </span>
                         </div>
-                        <Link
-                          href={`/loop/${loop.id}`}
-                          style={{
-                            fontSize: 12,
-                            padding: '4px 10px',
-                            borderRadius: 6,
-                            border: '1px solid #30363d',
-                            color: '#e6edf3',
-                          }}
-                        >
-                          进入群聊
-                        </Link>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm('确定要删除该 Loop 吗？删除后不可恢复。')) return;
+                              try {
+                                const res = await fetch(`${ORCHESTRATOR}/api/loops/${loop.id}`, {
+                                  method: 'DELETE',
+                                });
+                                if (!res.ok) throw new Error('删除失败');
+                                alert('删除成功');
+                                void loadProjects();
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : '删除失败');
+                              }
+                            }}
+                            style={{
+                              fontSize: 12,
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              border: '1px solid #da3633',
+                              color: '#da3633',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            删除
+                          </button>
+                          <Link
+                            href={`/loop/${loop.id}`}
+                            style={{
+                              fontSize: 12,
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              border: '1px solid #30363d',
+                              color: '#e6edf3',
+                            }}
+                          >
+                            进入群聊
+                          </Link>
+                        </div>
                       </li>
                     ))}
                   </ul>
