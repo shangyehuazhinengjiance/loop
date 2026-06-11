@@ -396,16 +396,18 @@ export function ChatRoom({ loopId }: { loopId: string }) {
 
   function isAwaitingTestApproval(): boolean {
     return (
-      deployConfig?.step === 'awaiting_test_approval' ||
-      deployConfig?.step === 'awaiting_pipeline' ||
-      deployConfig?.step === 'awaiting_manual_test_deploy'
+      phase === 'deployment' &&
+      (deployConfig?.step === 'awaiting_test_approval' ||
+        deployConfig?.step === 'awaiting_pipeline' ||
+        deployConfig?.step === 'awaiting_manual_test_deploy')
     );
   }
 
   function isAwaitingProdApproval(): boolean {
     return (
-      deployConfig?.step === 'awaiting_prod_approval' ||
-      deployConfig?.step === 'awaiting_manual_prod_verify'
+      phase === 'deployment' &&
+      (deployConfig?.step === 'awaiting_prod_approval' ||
+        deployConfig?.step === 'awaiting_manual_prod_verify')
     );
   }
 
@@ -596,6 +598,30 @@ export function ChatRoom({ loopId }: { loopId: string }) {
 
   async function approve(action: string) {
     if (!user || busy) return;
+    if (
+      action === 'approve_deploy' &&
+      phase === 'done' &&
+      (deployConfig?.step === 'awaiting_prod_approval' ||
+        deployConfig?.step === 'awaiting_manual_prod_verify')
+    ) {
+      setClientPending(APPROVE_PENDING_LABEL.approve_deploy);
+      try {
+        const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, approvedBy: user.userId }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.message ?? `审批失败 (${res.status})`);
+          return;
+        }
+        await refreshLoop();
+      } finally {
+        setClientPending(null);
+      }
+      return;
+    }
     if (!isActionAvailable(action)) {
       alert(`当前阶段为 ${phase}，无法执行 ${action}`);
       return;
@@ -798,15 +824,37 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             {devConfig?.mode === 'agent' ? ' · Dev Agent' : ''}
             {devConfig?.mode === 'external' ? ' · 外部工具' : ''}
             {deployConfig?.executionMode === 'manual' ? ' · 人工部署' : ''}
-            {deployConfig?.step === 'awaiting_mr_merge' ? ' · 待合并 MR' : ''}
-            {deployConfig?.step === 'awaiting_manual_test_deploy' ? ' · 待部署测试' : ''}
-            {deployConfig?.step === 'awaiting_test_deploy' ? ' · 测试环境部署中' : ''}
-            {deployConfig?.step === 'awaiting_test_approval' ? ' · 待测试审批' : ''}
-            {deployConfig?.step === 'awaiting_master_mr_merge' ? ' · 待合并上线 MR' : ''}
-            {deployConfig?.step === 'awaiting_manual_prod_verify' ? ' · 待验证生产' : ''}
-            {deployConfig?.step === 'awaiting_prod_deploy' ? ' · 生产部署中' : ''}
-            {deployConfig?.step === 'awaiting_prod_approval' ? ' · 待确认上线' : ''}
-            {deployConfig?.step === 'awaiting_pipeline' ? ' · 待跑流水线' : ''}
+            {phase === 'deployment' && deployConfig?.step === 'awaiting_mr_merge'
+              ? ' · 待合并 MR'
+              : ''}
+            {phase === 'deployment' &&
+            deployConfig?.step === 'awaiting_manual_test_deploy'
+              ? ' · 待部署测试'
+              : ''}
+            {phase === 'deployment' && deployConfig?.step === 'awaiting_test_deploy'
+              ? ' · 测试环境部署中'
+              : ''}
+            {phase === 'deployment' && deployConfig?.step === 'awaiting_test_approval'
+              ? ' · 待测试审批'
+              : ''}
+            {phase === 'deployment' &&
+            deployConfig?.step === 'awaiting_master_mr_merge'
+              ? ' · 待合并上线 MR'
+              : ''}
+            {phase === 'deployment' &&
+            deployConfig?.step === 'awaiting_manual_prod_verify'
+              ? ' · 待验证生产'
+              : ''}
+            {phase === 'deployment' && deployConfig?.step === 'awaiting_prod_deploy'
+              ? ' · 生产部署中'
+              : ''}
+            {phase === 'deployment' && deployConfig?.step === 'awaiting_prod_approval'
+              ? ' · 待确认上线'
+              : ''}
+            {phase === 'deployment' && deployConfig?.step === 'awaiting_pipeline'
+              ? ' · 待跑流水线'
+              : ''}
+            {phase === 'done' ? ' · 已完成' : ''}
             {loopStatus === 'blocked' ? ' · 阻塞中' : ''}
           </span>
           <button

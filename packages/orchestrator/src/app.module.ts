@@ -38,6 +38,7 @@ import { InputRequirementsService } from './requirements/input-requirements.serv
 import { LoopRecoveryService } from './recovery/loop-recovery.service.js';
 import { LoopProgressService } from './chat/loop-progress.service.js';
 import { PmUnderstandingService } from './requirements/pm-understanding.service.js';
+import { LoopDotLoopService } from './loop-context/loop-dot-loop.service.js';
 
 @Module({
   controllers: [LoopController, AgentController, ChatSseController],
@@ -78,6 +79,7 @@ import { PmUnderstandingService } from './requirements/pm-understanding.service.
     LoopRecoveryService,
     LoopProgressService,
     PmUnderstandingService,
+    LoopDotLoopService,
   ],
 })
 export class AppModule {}

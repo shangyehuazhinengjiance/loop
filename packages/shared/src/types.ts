@@ -150,6 +150,8 @@ export interface DeploymentInfo {
   testApproverUserId?: string;
   testApproverDisplayName?: string;
   prodDeployedAt?: string;
+  prodApprovedAt?: string;
+  prodApprovedBy?: string;
 }
 
 export type DevelopmentMode = 'agent' | 'external';

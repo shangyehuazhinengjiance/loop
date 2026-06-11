@@ -18,7 +18,7 @@ import { ProjectRepository } from '../db/repositories/project.repository.js';
 import { ModelRouter } from '../model/model-router.js';
 import { SandboxService } from '../sandbox/sandbox.service.js';
 import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
-import { RequirementsSummaryService } from '../requirements/requirements-summary.service.js';
+import { LoopDotLoopService } from '../loop-context/loop-dot-loop.service.js';
 import { LoopMemberService } from '../member/loop-member.service.js';
 import { AgentCoordinator, type AgentActivateEvent } from './agent-coordinator.js';
 import type { LoopRow } from '../db/repositories/loop.repository.js';
@@ -37,7 +37,7 @@ export class AgentRunnerService implements OnModuleInit {
     private readonly chatService: ChatService,
     private readonly sandbox: SandboxService,
     private readonly codebaseSummary: CodebaseSummaryService,
-    private readonly requirementsSummary: RequirementsSummaryService,
+    private readonly loopDotLoop: LoopDotLoopService,
     private readonly memberService: LoopMemberService,
   ) {}
 
@@ -237,8 +237,10 @@ export class AgentRunnerService implements OnModuleInit {
     if (agent === 'pm') {
       const allMessages = await this.chatService.listMessages(loopId);
       const humanCount = allMessages.filter((m) => m.sender.type === 'human').length;
-      const projectRequirementsSummary =
-        await this.requirementsSummary.readProjectSummary(loop.project_id);
+      const loopDotBundle = await this.loopDotLoop.readForLoop(loopId);
+      const loopDotLoopContext = loopDotBundle
+        ? this.loopDotLoop.formatForPmPrompt(loopDotBundle)
+        : undefined;
       const isLoopEntry =
         loop.phase === 'requirement' &&
         !loop.context.prd &&
@@ -250,7 +252,7 @@ export class AgentRunnerService implements OnModuleInit {
       );
       await runPmAgent({
         ...common,
-        projectRequirementsSummary: projectRequirementsSummary ?? undefined,
+        loopDotLoopContext,
         isLoopEntry,
       });
       return;

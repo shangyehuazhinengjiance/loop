@@ -560,6 +560,28 @@ export class DeploymentService {
     });
   }
 
+  /** Loop 完成（approve_deploy）：清除部署子步骤，避免 done 阶段仍显示待验证按钮 */
+  async onProdVerificationComplete(
+    loopId: string,
+    approvedBy: string,
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop?.context.deployment) return;
+
+    const now = new Date().toISOString();
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      deployment: {
+        ...loop.context.deployment,
+        step: undefined,
+        status: 'production',
+        prodApprovedAt: now,
+        prodApprovedBy: approvedBy,
+      },
+    });
+    await this.loopRepo.updateBlocker(loopId, null, 'active');
+  }
+
   /** @deprecated 使用 onTestApproved */
   async startProdDeploy(loopId: string, approvedBy: string): Promise<void> {
     return this.onTestApproved(loopId, approvedBy);

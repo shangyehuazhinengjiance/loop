@@ -18,6 +18,7 @@ import { ArtifactService } from '../artifact/artifact.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import { DeploymentService } from '../deployment/deployment.service.js';
 import { RequirementsSummaryService } from '../requirements/requirements-summary.service.js';
+import { LoopDotLoopService } from '../loop-context/loop-dot-loop.service.js';
 
 export interface PhaseChangeEvent {
   loopId: string;
@@ -42,6 +43,7 @@ export class PhaseService {
     private readonly auditService: AuditService,
     private readonly deploymentService: DeploymentService,
     private readonly requirementsSummary: RequirementsSummaryService,
+    private readonly loopDotLoop: LoopDotLoopService,
   ) {}
 
   getStateMachine(): PhaseStateMachine {
@@ -94,7 +96,12 @@ export class PhaseService {
     }
 
     if (action === 'approve_deploy' && event.toPhase === 'done') {
-      void this.requirementsSummary.finalizeLoop(loopId, approvedBy);
+      await this.deploymentService.onProdVerificationComplete(loopId, approvedBy);
+      if (this.loopDotLoop.isEnabled()) {
+        void this.loopDotLoop.finalizeOnLoopComplete(loopId, approvedBy);
+      } else {
+        void this.requirementsSummary.finalizeLoop(loopId, approvedBy);
+      }
     }
 
     return event;

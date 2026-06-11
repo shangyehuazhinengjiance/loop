@@ -22,7 +22,7 @@ export interface RunPmAgentInput {
   members?: LoopMember[];
   triggeredByUserId?: string;
   requirement?: string;
-  projectRequirementsSummary?: string;
+  loopDotLoopContext?: string;
   isLoopEntry?: boolean;
   signal?: AbortSignal;
 }
@@ -50,14 +50,14 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     existingPrd: loop.context.prd?.content,
     chatHistory: humanMessages,
     memberRoster: input.memberRoster,
-    projectRequirementsSummary: input.projectRequirementsSummary,
+    loopDotLoopContext: input.loopDotLoopContext,
     isLoopEntry: input.isLoopEntry,
     inputRequirements: loop.context.inputRequirements,
   });
 
   await reportPmPreLlmProgress(api, loop, {
     isLoopEntry: input.isLoopEntry,
-    projectRequirementsSummary: input.projectRequirementsSummary,
+    loopDotLoopContext: input.loopDotLoopContext,
   });
 
   if (input.model.runtime === 'client-sdk') {
