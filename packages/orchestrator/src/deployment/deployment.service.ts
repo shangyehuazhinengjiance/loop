@@ -5,6 +5,7 @@ import {
   suggestAssignee,
 } from '@loop/shared';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { ChatService } from '../chat/chat.service.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
@@ -21,6 +22,7 @@ export class DeploymentService {
     private readonly chatService: ChatService,
     private readonly mergeRequestService: MergeRequestService,
     private readonly projectRepo: ProjectRepository,
+    private readonly agentCoordinator: AgentCoordinator,
   ) {}
 
   /**
@@ -204,18 +206,12 @@ export class DeploymentService {
       throw new BadRequestException('仅被指派的合并负责人可确认 MR 已合并');
     }
 
-    const members = await this.memberRepo.listByLoop(input.loopId);
-    const pipelineAssignee = pickNotifyMember(members, {
-      skillsHint:
-        process.env.DEPLOY_PIPELINE_SKILLS ?? '运维 CI 流水线 K8s',
-    });
-
     const now = new Date().toISOString();
     await this.loopRepo.updateContext(input.loopId, {
       ...loop.context,
       deployment: {
         ...dep,
-        step: 'awaiting_pipeline',
+        step: 'awaiting_test_deploy',
         mrMergedAt: now,
         mrMergedBy: input.userId,
         status: 'pending',
@@ -223,43 +219,130 @@ export class DeploymentService {
     });
     await this.loopRepo.updateBlocker(input.loopId, null, 'active');
 
-    const mention = pipelineAssignee
-      ? `@${pipelineAssignee.userId}（${pipelineAssignee.displayName}）`
-      : '**运维同事**';
-
     const mr = dep.mergeRequest;
-    const body = [
-      '## MR 已合并，请跑流水线',
-      '',
-      mr ? `- MR：[链接](${mr.url})` : '',
-      `- 目标分支：\`${dep.targetBranch ?? 'test'}\``,
-      input.note ? `- 备注：${input.note}` : '',
-      '',
-      `请 ${mention} **手动触发 CI/CD 流水线**完成部署验证。`,
-      '',
-      '流水线跑通后，点击下方「流水线已完成」结束本 Loop。',
-    ]
-      .filter(Boolean)
-      .join('\n');
-
     await this.chatService.publishAgentMessage({
       loopId: input.loopId,
       phase: 'deployment',
       agentId: 'orchestrator',
       content: {
-        type: 'artifact',
-        body,
-        mentions: pipelineAssignee
-          ? failureMentions(pipelineAssignee)
-          : undefined,
-        actions: [
-          {
-            id: 'approve-deploy',
-            label: '流水线已完成',
-            action: 'approve_deploy',
-          },
-        ],
+        type: 'text',
+        body: [
+          '## MR 已合并',
+          '',
+          mr ? `- MR：[链接](${mr.url})` : '',
+          `- 目标分支：\`${dep.targetBranch ?? 'test'}\``,
+          input.note ? `- 备注：${input.note}` : '',
+          '',
+          '正在启动 **Ops Agent** 部署测试环境…',
+        ]
+          .filter(Boolean)
+          .join('\n'),
       },
+    });
+
+    await this.triggerOpsDeploy(input.loopId, input.userId, 'test');
+  }
+
+  /** 测试环境审批通过后，触发 Ops Agent 生产部署 */
+  async startProdDeploy(loopId: string, approvedBy: string): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) throw new NotFoundException('Loop not found');
+    if (loop.phase !== 'deployment') {
+      throw new BadRequestException('当前不在 deployment 阶段');
+    }
+
+    const dep = loop.context.deployment;
+    if (dep?.step !== 'awaiting_test_approval' && dep?.step !== 'awaiting_pipeline') {
+      throw new BadRequestException('当前不在等待测试环境审批状态');
+    }
+
+    const now = new Date().toISOString();
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      deployment: {
+        ...dep,
+        step: 'awaiting_prod_deploy',
+        testApprovedAt: now,
+        testApprovedBy: approvedBy,
+        status: 'pending',
+      },
+    });
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: 'deployment',
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: '测试环境验证已通过，正在启动 **Ops Agent** 执行生产环境正式上线…',
+      },
+    });
+
+    await this.triggerOpsDeploy(loopId, approvedBy, 'production');
+  }
+
+  /** 测试审批拒绝：清理部署子状态（回退由 ApprovalService 触发） */
+  async markTestRejected(loopId: string, rejectedBy: string, note?: string): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop?.context.deployment) return;
+
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      deployment: {
+        ...loop.context.deployment,
+        step: undefined,
+        status: 'failed',
+        testRejectedAt: new Date().toISOString(),
+        testRejectedBy: rejectedBy,
+      },
+    });
+    await this.loopRepo.updateBlocker(loopId, null, 'active');
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: loop.phase,
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: [
+          '## 测试环境验证未通过',
+          '',
+          note ? `原因：${note}` : '流程将回退至 **development** 阶段，请修复后重新提交。',
+        ].join('\n'),
+      },
+    });
+  }
+
+  private async triggerOpsDeploy(
+    loopId: string,
+    userId: string,
+    target: 'test' | 'production',
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) return;
+
+    const members = await this.memberRepo.listByLoop(loopId);
+    if (target === 'test') {
+      const testApprover = pickNotifyMember(members, {
+        preferUserId: userId,
+        skillsHint:
+          process.env.DEPLOY_TEST_APPROVER_SKILLS ?? '测试 验收 QA',
+      });
+      if (testApprover && loop.context.deployment) {
+        await this.loopRepo.updateContext(loopId, {
+          ...loop.context,
+          deployment: {
+            ...loop.context.deployment,
+            testApproverUserId: testApprover.userId,
+            testApproverDisplayName: testApprover.displayName,
+          },
+        });
+      }
+    }
+
+    await this.agentCoordinator.activate(loopId, 'ops', {
+      reason: 'manual',
+      userId,
     });
   }
 }

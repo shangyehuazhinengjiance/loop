@@ -18,6 +18,8 @@ const ACTION_REQUIRED_PHASE: Record<string, string> = {
   approve_prd: 'requirement',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
+  approve_test: 'deployment',
+  reject_test: 'deployment',
   approve_deploy: 'deployment',
 };
 
@@ -25,7 +27,9 @@ const APPROVE_PENDING_LABEL: Record<string, string> = {
   approve_prd: '正在确认 PRD…',
   approve_dev: '正在提交开发验收…',
   confirm_mr_merged: '正在确认 MR 合并…',
-  approve_deploy: '正在确认流水线完成…',
+  approve_test: '正在确认测试通过…',
+  reject_test: '正在回退至开发…',
+  approve_deploy: '正在确认正式上线完成…',
   select_dev_mode_agent: '正在启动 Dev Agent…',
   select_dev_mode_external: '正在发布 PRD 并交接…',
   complete_external_dev: '正在提交开发完成…',
@@ -71,9 +75,16 @@ interface DevelopmentConfig {
 }
 
 interface DeploymentConfig {
-  step?: 'awaiting_mr_merge' | 'awaiting_pipeline';
+  step?:
+    | 'awaiting_mr_merge'
+    | 'awaiting_pipeline'
+    | 'awaiting_test_deploy'
+    | 'awaiting_test_approval'
+    | 'awaiting_prod_deploy'
+    | 'awaiting_prod_approval';
   mergeRequest?: { url: string; number: number; headBranch?: string; baseBranch?: string };
   mergeAssigneeUserId?: string;
+  testApproverUserId?: string;
   targetBranch?: string;
 }
 
@@ -266,6 +277,14 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     );
   }
 
+  function canApproveTest(): boolean {
+    if (!user || !isAwaitingTestApproval()) return false;
+    if (deployConfig?.testApproverUserId) {
+      return deployConfig.testApproverUserId === user.userId;
+    }
+    return true;
+  }
+
   function isLatestMrMergeMessage(message: Message): boolean {
     const last = [...messages]
       .reverse()
@@ -275,13 +294,35 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return last?.id === message.id;
   }
 
-  function isLatestPipelineMessage(message: Message): boolean {
+  function isLatestTestApprovalMessage(message: Message): boolean {
+    const last = [...messages]
+      .reverse()
+      .find((m) =>
+        m.content.actions?.some(
+          (a) => a.action === 'approve_test' || a.action === 'reject_test',
+        ),
+      );
+    return last?.id === message.id;
+  }
+
+  function isLatestProdApprovalMessage(message: Message): boolean {
     const last = [...messages]
       .reverse()
       .find((m) =>
         m.content.actions?.some((a) => a.action === 'approve_deploy'),
       );
     return last?.id === message.id;
+  }
+
+  function isAwaitingTestApproval(): boolean {
+    return (
+      deployConfig?.step === 'awaiting_test_approval' ||
+      deployConfig?.step === 'awaiting_pipeline'
+    );
+  }
+
+  function isAwaitingProdApproval(): boolean {
+    return deployConfig?.step === 'awaiting_prod_approval';
   }
 
   /** 展示审批按钮（含不可用态，避免「文案让点但按钮消失」） */
@@ -305,14 +346,21 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       if (deployConfig?.step !== 'awaiting_mr_merge') return false;
       return isLatestMrMergeMessage(message);
     }
+    if (action === 'approve_test' || action === 'reject_test') {
+      if (!isAwaitingTestApproval()) return false;
+      return isLatestTestApprovalMessage(message);
+    }
     if (!isActionAvailable(action)) return false;
     if (action === 'approve_prd') {
       return message.content.type === 'artifact';
     }
     if (action === 'approve_deploy') {
-      if (deployConfig?.step !== 'awaiting_pipeline') return false;
-      if (message.content.type !== 'artifact') return false;
-      return isLatestPipelineMessage(message);
+      if (!isAwaitingTestApproval() && !isAwaitingProdApproval()) return false;
+      if (deployConfig?.step === 'awaiting_pipeline' || isAwaitingProdApproval()) {
+        if (message.content.type !== 'artifact') return false;
+        return isLatestProdApprovalMessage(message);
+      }
+      return false;
     }
     return true;
   }
@@ -327,8 +375,11 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     if (action === 'confirm_mr_merged') {
       return canConfirmMrMerged();
     }
+    if (action === 'approve_test' || action === 'reject_test') {
+      return canApproveTest();
+    }
     if (action === 'approve_deploy') {
-      return deployConfig?.step === 'awaiting_pipeline';
+      return isAwaitingProdApproval() || deployConfig?.step === 'awaiting_pipeline';
     }
     return isActionAvailable(action);
   }
@@ -354,8 +405,16 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       }
       return undefined;
     }
-    if (action === 'approve_deploy' && deployConfig?.step !== 'awaiting_pipeline') {
-      return '请先完成 MR 合并并确认';
+    if (action === 'approve_test' || action === 'reject_test') {
+      if (!canApproveTest()) {
+        return deployConfig?.testApproverUserId
+          ? '仅被指派的测试审批人可操作'
+          : '请等待测试环境部署完成';
+      }
+      return undefined;
+    }
+    if (action === 'approve_deploy' && !isAwaitingProdApproval() && deployConfig?.step !== 'awaiting_pipeline') {
+      return '请先完成测试审批与生产部署';
     }
     if (!isActionAvailable(action)) {
       const required = ACTION_REQUIRED_PHASE[action];
@@ -607,6 +666,10 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             {devConfig?.mode === 'agent' ? ' · Dev Agent' : ''}
             {devConfig?.mode === 'external' ? ' · 外部工具' : ''}
             {deployConfig?.step === 'awaiting_mr_merge' ? ' · 待合并 MR' : ''}
+            {deployConfig?.step === 'awaiting_test_deploy' ? ' · 测试环境部署中' : ''}
+            {deployConfig?.step === 'awaiting_test_approval' ? ' · 待测试审批' : ''}
+            {deployConfig?.step === 'awaiting_prod_deploy' ? ' · 生产部署中' : ''}
+            {deployConfig?.step === 'awaiting_prod_approval' ? ' · 待确认上线' : ''}
             {deployConfig?.step === 'awaiting_pipeline' ? ' · 待跑流水线' : ''}
             {loopStatus === 'blocked' ? ' · 阻塞中' : ''}
           </span>

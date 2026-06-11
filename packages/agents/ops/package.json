@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+    "prebuild": "npm run build -w @loop/agent-dev",
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx --watch src/worker.ts"
   },
