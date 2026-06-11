@@ -9,10 +9,25 @@ import { Injectable } from '@nestjs/common';
  *   - env:VAR_NAME          → process.env[VAR_NAME]
  *   - file:/path/to/key     → SSH key 文件路径
  *   - GIT_SSH_KEY_PATH      → 默认 SSH
- *   - GIT_ACCESS_TOKEN      → 默认 Token
+ *   - GIT_ACCESS_TOKEN      → 默认 Token（MR/PR API 专用，与 SSH clone 分离）
  */
 @Injectable()
 export class SecretManager {
+  /**
+   * 创建 MR/PR 时使用的 API Token 引用。
+   * 勿使用项目的 SSH credentialRef（Deploy Key 无法调 GitHub/GitLab API）。
+   */
+  resolveMrApiCredentialRef(gitConfig?: {
+    mrCredentialRef?: string;
+    credentialRef?: string;
+  }): string {
+    const fromProject = gitConfig?.mrCredentialRef?.trim();
+    if (fromProject) return fromProject;
+    const fromEnv = process.env.GIT_MR_CREDENTIAL_REF?.trim();
+    if (fromEnv) return fromEnv;
+    return 'GIT_ACCESS_TOKEN';
+  }
+
   async get(credentialRef: string): Promise<GitCredential> {
     if (credentialRef.startsWith('env:')) {
       const key = credentialRef.slice(4);
@@ -55,6 +70,12 @@ export class SecretManager {
     const token = process.env.GIT_ACCESS_TOKEN ?? process.env[credentialRef];
     if (token && !token.includes('/') && token.length > 8) {
       return { type: 'token', token };
+    }
+
+    if (credentialRef === 'GIT_ACCESS_TOKEN' || credentialRef.toLowerCase().includes('token')) {
+      throw new Error(
+        'GIT_ACCESS_TOKEN 未配置。创建 MR/PR 需要 GitHub PAT 或 GitLab Token（与 SSH Deploy Key 不同），请在 Orchestrator Secret 或 .env 中设置。',
+      );
     }
 
     throw new Error(`Cannot resolve credential: ${credentialRef}`);

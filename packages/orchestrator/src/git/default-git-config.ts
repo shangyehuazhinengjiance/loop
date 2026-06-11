@@ -8,6 +8,9 @@ export function defaultGitConfigFromEnv(): Record<string, unknown> | undefined {
     defaultBranch: process.env.GIT_DEFAULT_BRANCH?.trim() || 'main',
     credentialRef:
       process.env.GIT_DEFAULT_CREDENTIAL_REF?.trim() || 'GIT_SSH_KEY_PATH',
+    /** MR/PR API 与 SSH clone 分离，默认读 GIT_ACCESS_TOKEN */
+    mrCredentialRef:
+      process.env.GIT_MR_CREDENTIAL_REF?.trim() || 'GIT_ACCESS_TOKEN',
   };
 }
 

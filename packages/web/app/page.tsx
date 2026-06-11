@@ -135,6 +135,7 @@ export default function HomePage() {
         gitConfig.remoteUrl = remoteUrl.trim();
         gitConfig.defaultBranch = defaultBranch.trim() || 'main';
         gitConfig.credentialRef = 'GIT_SSH_KEY_PATH';
+        gitConfig.mrCredentialRef = 'GIT_ACCESS_TOKEN';
       }
 
       const projectBody: Record<string, unknown> = {

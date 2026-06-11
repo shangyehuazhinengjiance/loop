@@ -12,6 +12,7 @@ import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
 import { GitService } from '../git/git.service.js';
 import { MergeRequestService } from '../git/merge-request.service.js';
+import { SecretManager } from '../git/secret-manager.js';
 
 @Injectable()
 export class DeploymentService {
@@ -23,6 +24,7 @@ export class DeploymentService {
     private readonly mergeRequestService: MergeRequestService,
     private readonly projectRepo: ProjectRepository,
     private readonly agentCoordinator: AgentCoordinator,
+    private readonly secretManager: SecretManager,
   ) {}
 
   /**
@@ -59,11 +61,14 @@ export class DeploymentService {
       const gitConfig = projectEntity?.git_config as {
         remoteUrl?: string;
         credentialRef?: string;
+        mrCredentialRef?: string;
       } | undefined;
 
       if (!gitConfig?.remoteUrl) {
         throw new Error('项目未配置 gitConfig.remoteUrl');
       }
+
+      const mrCredentialRef = this.secretManager.resolveMrApiCredentialRef(gitConfig);
 
       const devMode = loop.context.development?.mode;
       if (devMode !== 'external') {
@@ -76,7 +81,7 @@ export class DeploymentService {
 
       const mr = await this.mergeRequestService.createOrGetMergeRequest({
         remoteUrl: gitConfig.remoteUrl,
-        credentialRef: gitConfig.credentialRef ?? 'GIT_ACCESS_TOKEN',
+        credentialRef: mrCredentialRef,
         headBranch,
         baseBranch: targetBranch,
         title: `loop ${loopId}: ${loop.title}`,

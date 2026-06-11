@@ -30,7 +30,9 @@ export class MergeRequestService {
     const credential = await this.secretManager.get(input.credentialRef);
     if (credential.type !== 'token' || !credential.token) {
       throw new Error(
-        '创建 MR 需要 GIT_ACCESS_TOKEN（或项目 gitConfig.credentialRef 指向的 Token）。SSH Deploy Key 无法调用 MR API。',
+        `创建 MR 需要 API Token（当前引用 \`${input.credentialRef}\` 解析为 SSH，不可用）。` +
+          '请在 Orchestrator 环境变量中配置 GIT_ACCESS_TOKEN（GitHub PAT / GitLab Token，需 repo 与 PR/MR 权限），' +
+          '与 GIT_SSH_KEY_PATH 的 Deploy Key 可同时存在。',
       );
     }
 

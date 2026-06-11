@@ -16,6 +16,8 @@ data:
   GIT_DEFAULT_CREDENTIAL_REF: "GIT_SSH_KEY_PATH"
   # 与 orchestrator-deployment 中 git-deploy-key 卷挂载路径一致
   GIT_SSH_KEY_PATH: "/secrets/git/id_ed25519"
+  # 创建 MR/PR 用（值在 loop-secrets 的 GIT_ACCESS_TOKEN，勿与 SSH 混用）
+  GIT_MR_CREDENTIAL_REF: "GIT_ACCESS_TOKEN"
 
   # PM 模型（非密钥部分）
   PM_MODEL_BASE_URL: "https://api.anthropic.com"
