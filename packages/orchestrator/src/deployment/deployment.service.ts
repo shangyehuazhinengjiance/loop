@@ -16,7 +16,10 @@ import { LoopMemberRepository } from '../db/repositories/loop-member.repository.
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
 import { GitService } from '../git/git.service.js';
-import { MergeRequestService } from '../git/merge-request.service.js';
+import {
+  isNoCommitsBetweenBranchesError,
+  MergeRequestService,
+} from '../git/merge-request.service.js';
 import { SecretManager } from '../git/secret-manager.js';
 
 @Injectable()
@@ -335,6 +338,23 @@ export class DeploymentService {
     });
   }
 
+  private isAwaitingTestApprovalStep(step?: string): boolean {
+    return (
+      step === 'awaiting_test_approval' ||
+      step === 'awaiting_pipeline' ||
+      step === 'awaiting_manual_test_deploy'
+    );
+  }
+
+  private hasPassedTestApproval(step?: string): boolean {
+    return (
+      step === 'awaiting_master_mr_merge' ||
+      step === 'awaiting_manual_prod_verify' ||
+      step === 'awaiting_prod_deploy' ||
+      step === 'awaiting_prod_approval'
+    );
+  }
+
   /** 测试验证通过：manual 创建 master MR；agent 启动 Ops 生产部署 */
   async onTestApproved(loopId: string, approvedBy: string): Promise<void> {
     const loop = await this.loopRepo.findById(loopId);
@@ -343,6 +363,13 @@ export class DeploymentService {
     const dep = loop.context.deployment;
     const mode = dep?.executionMode ?? 'manual';
     const now = new Date().toISOString();
+
+    if (this.hasPassedTestApproval(dep?.step)) {
+      return;
+    }
+    if (!this.isAwaitingTestApprovalStep(dep?.step)) {
+      throw new BadRequestException('当前不在等待测试环境审批状态');
+    }
 
     await this.loopRepo.updateContext(loopId, {
       ...loop.context,
@@ -414,11 +441,25 @@ export class DeploymentService {
       const mrCredentialRef = this.secretManager.resolveMrApiCredentialRef(
         gitConfig as { mrCredentialRef?: string },
       );
-      const mr = await this.mergeRequestService.createOrGetMergeRequest({
+      const mrInput = {
         remoteUrl: String(gitConfig.remoteUrl),
         credentialRef: mrCredentialRef,
         headBranch: testB,
         baseBranch: prodB,
+      };
+
+      const comparison = await this.mergeRequestService.compareBranches(mrInput);
+      if (comparison.aheadBy === 0 || comparison.identical) {
+        await this.enterManualProdVerify(loopId, approvedBy, {
+          skippedMasterMr: true,
+          testBranch: testB,
+          prodBranch: prodB,
+        });
+        return;
+      }
+
+      const mr = await this.mergeRequestService.createOrGetMergeRequest({
+        ...mrInput,
         title: `loop ${loopId}: release to ${prodB}`,
         body: [
           `## Loop 上线合并请求`,
@@ -487,9 +528,112 @@ export class DeploymentService {
           ],
         },
       });
+    } catch (err) {
+      if (isNoCommitsBetweenBranchesError(err)) {
+        await this.enterManualProdVerify(loopId, approvedBy, {
+          skippedMasterMr: true,
+          testBranch: testB,
+          prodBranch: prodB,
+        });
+        return;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.chatService.publishAgentMessage({
+        loopId,
+        phase: 'deployment',
+        agentId: 'orchestrator',
+        content: {
+          type: 'text',
+          body: [
+            '## 上线 MR 创建失败',
+            '',
+            msg,
+            '',
+            '请检查 Git 分支与权限后，**再次点击「测试环境验证通过」** 重试。',
+          ].join('\n'),
+        },
+      });
+      throw err;
     } finally {
       this.chatService.emitProcessing({ loopId, active: false });
     }
+  }
+
+  /** manual：测试通过后进入生产验证（可跳过无差异的 test→master MR） */
+  private async enterManualProdVerify(
+    loopId: string,
+    userId: string,
+    options?: {
+      note?: string;
+      skippedMasterMr?: boolean;
+      testBranch?: string;
+      prodBranch?: string;
+    },
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop?.context.deployment) return;
+
+    const dep = loop.context.deployment;
+    if (dep.step === 'awaiting_manual_prod_verify') return;
+
+    const now = new Date().toISOString();
+    const prodB = options?.prodBranch ?? dep.productionBranch ?? productionBranch();
+    const testB = options?.testBranch ?? dep.targetBranch ?? testBranch();
+
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      deployment: {
+        ...dep,
+        step: 'awaiting_manual_prod_verify',
+        masterMrMergedAt: options?.skippedMasterMr ? now : dep.masterMrMergedAt,
+        masterMrMergedBy: options?.skippedMasterMr ? userId : dep.masterMrMergedBy,
+      },
+    });
+    await this.loopRepo.updateBlocker(loopId, null, 'active');
+
+    const members = await this.memberRepo.listByLoop(loopId);
+    const verifyAssignee = pickNotifyMember(members, {
+      preferUserId: userId,
+      skillsHint: process.env.DEPLOY_TEST_APPROVER_SKILLS ?? '测试 验收 QA',
+    });
+
+    const skipNote = options?.skippedMasterMr
+      ? [
+          '',
+          `> \`${testB}\` 与 \`${prodB}\` **无新提交差异**，已跳过上线 MR，请直接验证生产环境。`,
+        ]
+      : [];
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: 'deployment',
+      agentId: 'orchestrator',
+      content: {
+        type: 'artifact',
+        body: [
+          '## 请验证生产环境',
+          '',
+          dep.masterMergeRequest
+            ? `- 上线 MR：[链接](${dep.masterMergeRequest.url})`
+            : '',
+          `- 生产分支：\`${prodB}\``,
+          options?.note ? `- 备注：${options.note}` : '',
+          ...skipNote,
+          '',
+          `请 ${this.formatMention(verifyAssignee, members, '测试')} **手动部署/触发流水线**（若尚未自动发布），验证生产环境无误后点击下方按钮完成本 Loop。`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        mentions: verifyAssignee ? failureMentions(verifyAssignee) : undefined,
+        actions: [
+          {
+            id: 'approve-deploy',
+            label: '生产环境验证通过，完成 Loop',
+            action: 'approve_deploy',
+          },
+        ],
+      },
+    });
   }
 
   async confirmMasterMrMerged(input: {
@@ -510,53 +654,8 @@ export class DeploymentService {
       throw new BadRequestException('仅被指派的合并负责人可确认上线 MR');
     }
 
-    const now = new Date().toISOString();
-    await this.loopRepo.updateContext(input.loopId, {
-      ...loop.context,
-      deployment: {
-        ...dep,
-        step: 'awaiting_manual_prod_verify',
-        masterMrMergedAt: now,
-        masterMrMergedBy: input.userId,
-      },
-    });
-    await this.loopRepo.updateBlocker(input.loopId, null, 'active');
-
-    const prodB = dep.productionBranch ?? productionBranch();
-    const members = await this.memberRepo.listByLoop(input.loopId);
-    const verifyAssignee = pickNotifyMember(members, {
-      preferUserId: input.userId,
-      skillsHint: process.env.DEPLOY_TEST_APPROVER_SKILLS ?? '测试 验收 QA',
-    });
-
-    await this.chatService.publishAgentMessage({
-      loopId: input.loopId,
-      phase: 'deployment',
-      agentId: 'orchestrator',
-      content: {
-        type: 'artifact',
-        body: [
-          '## 请验证生产环境',
-          '',
-          dep.masterMergeRequest
-            ? `- 上线 MR：[链接](${dep.masterMergeRequest.url})`
-            : '',
-          `- 生产分支：\`${prodB}\``,
-          input.note ? `- 备注：${input.note}` : '',
-          '',
-          `请 ${this.formatMention(verifyAssignee, members, '测试')} **手动部署/触发流水线**（若尚未自动发布），验证生产环境无误后点击下方按钮完成本 Loop。`,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        mentions: verifyAssignee ? failureMentions(verifyAssignee) : undefined,
-        actions: [
-          {
-            id: 'approve-deploy',
-            label: '生产环境验证通过，完成 Loop',
-            action: 'approve_deploy',
-          },
-        ],
-      },
+    await this.enterManualProdVerify(input.loopId, input.userId, {
+      note: input.note,
     });
   }
 
