@@ -68,6 +68,17 @@ export class AgentRunnerService implements OnModuleInit {
     const abort = new AbortController();
     this.abortControllers.set(key, abort);
 
+    const agentTimeoutMs = this.resolveAgentTimeoutMs(event.agent);
+    const agentTimer = setTimeout(() => {
+      if (!abort.signal.aborted) {
+        abort.abort(
+          new Error(
+            `${this.agentLabel(event.agent)} 执行超时（${agentTimeoutMs}ms）`,
+          ),
+        );
+      }
+    }, agentTimeoutMs);
+
     try {
       const loop = await this.loopRepo.findById(event.loopId);
       if (loop?.status === 'blocked' && event.reason !== 'manual') {
@@ -82,15 +93,42 @@ export class AgentRunnerService implements OnModuleInit {
         event,
       );
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (abort.signal.aborted) {
+        const reason =
+          err instanceof Error && err.message
+            ? err.message
+            : `${this.agentLabel(event.agent)} 已取消或超时`;
+        const loop = await this.loopRepo.findById(event.loopId);
+        await this.notifyAgentFailure(
+          event,
+          loop?.phase ?? 'requirement',
+          new Error(reason),
+        );
+        return;
+      }
       console.error(`[agent-runner] ${key} failed`, err);
       const loop = await this.loopRepo.findById(event.loopId);
       await this.notifyAgentFailure(event, loop?.phase ?? 'requirement', err);
     } finally {
+      clearTimeout(agentTimer);
       this.running.delete(key);
       this.abortControllers.delete(key);
       this.emitAgentProcessing(event.loopId, event.agent, false);
     }
+  }
+
+  private resolveAgentTimeoutMs(agent: AgentRole): number {
+    const perAgent =
+      agent === 'pm'
+        ? process.env.PM_AGENT_TIMEOUT_MS
+        : agent === 'dev'
+          ? process.env.DEV_AGENT_TIMEOUT_MS
+          : process.env.OPS_AGENT_TIMEOUT_MS;
+    const parsed = parseInt(
+      perAgent ?? process.env.AGENT_TIMEOUT_MS ?? '300000',
+      10,
+    );
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
   }
 
   private emitAgentProcessing(loopId: string, agent: AgentRole, active: boolean): void {

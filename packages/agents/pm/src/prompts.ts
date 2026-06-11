@@ -1,3 +1,15 @@
+const LOOP_ENTRY_INPUT_MAX_CHARS = parseInt(
+  process.env.PM_LOOP_ENTRY_INPUT_MAX_CHARS ?? '12000',
+  10,
+);
+
+function truncateForLoopEntry(text: string, gitPath?: string): string {
+  if (text.length <= LOOP_ENTRY_INPUT_MAX_CHARS) return text;
+  const head = text.slice(0, LOOP_ENTRY_INPUT_MAX_CHARS);
+  const pathHint = gitPath ? `完整内容见仓库 \`${gitPath}\`。` : '完整内容见仓库路径。';
+  return `${head}\n\n…（下文已截断，${pathHint}）`;
+}
+
 export const PM_SYSTEM_PROMPT = `你是 AI Native Loop 系统中的 PM Agent。
 
 职责：
@@ -28,8 +40,12 @@ export function buildPMUserPrompt(input: {
   const parts: string[] = [];
 
   if (input.projectRequirementsSummary) {
+    const summary =
+      input.isLoopEntry
+        ? truncateForLoopEntry(input.projectRequirementsSummary)
+        : input.projectRequirementsSummary;
     parts.push(
-      `## 项目需求文档总结（历史 Loop 累积，请先阅读并理解）\n${input.projectRequirementsSummary}`,
+      `## 项目需求文档总结（历史 Loop 累积，请先阅读并理解）\n${summary}`,
     );
   } else {
     parts.push(
@@ -45,7 +61,10 @@ export function buildPMUserPrompt(input: {
           `- 标题：${input.inputRequirements.title}`,
           `- 仓库路径：\`${input.inputRequirements.gitPath}\``,
           '',
-          input.inputRequirements.content,
+          truncateForLoopEntry(
+            input.inputRequirements.content,
+            input.inputRequirements.gitPath,
+          ),
         ].join('\n'),
       );
       parts.push(

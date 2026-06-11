@@ -1,5 +1,5 @@
 import type { LoopMember, ResolvedModelConfig } from '@loop/shared';
-import { REQUEST_HUMAN_HELP_OPENAI_TOOL } from '@loop/shared';
+import { fetchWithTimeout, REQUEST_HUMAN_HELP_OPENAI_TOOL } from '@loop/shared';
 import { summarizeOpenAIResponse } from './debug.js';
 import { handlePmHumanHelp } from './human-help.js';
 import { notifyPmFailure } from './notify-failure.js';
@@ -55,27 +55,59 @@ export async function runPmAgentOpenAI(input: {
     .filter(Boolean)
     .join('\n\n');
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${input.model.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: input.model.model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: input.userContent },
-      ],
-      tools: [REQUEST_HUMAN_HELP_OPENAI_TOOL],
-      tool_choice: 'auto',
-      temperature: 0.3,
-      max_tokens: input.model.extra?.max_tokens
-        ? parseInt(input.model.extra.max_tokens, 10)
-        : 8192,
-    }),
-    signal: input.signal,
-  });
+  const maxTokens = input.isLoopEntry
+    ? parseInt(process.env.PM_LOOP_ENTRY_MAX_TOKENS ?? '1536', 10)
+    : input.model.extra?.max_tokens
+      ? parseInt(input.model.extra.max_tokens, 10)
+      : 8192;
+
+  const timeoutMs = parseInt(
+    process.env.PM_LLM_TIMEOUT_MS ??
+      process.env.LLM_FETCH_TIMEOUT_MS ??
+      '180000',
+    10,
+  );
+
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.model.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.model.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: input.userContent },
+        ],
+        tools: [REQUEST_HUMAN_HELP_OPENAI_TOOL],
+        tool_choice: 'auto',
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      }),
+      signal: input.signal,
+      timeoutMs,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await notifyPmFailure(
+      input.api,
+      input.loopId,
+      input.phase,
+      detail.includes('超时') ? detail : `LLM 请求异常：${detail}`,
+      input.members,
+      {
+        preferUserId: input.triggeredByUserId,
+        hints: [
+          '检查 PM_MODEL_BASE_URL / PM_MODEL_API_KEY 是否可达',
+          `当前超时 ${timeoutMs}ms，可调大 PM_LLM_TIMEOUT_MS`,
+        ],
+      },
+    );
+    return;
+  }
 
   const rawText = await res.text();
   let data: ChatCompletionResponse;

@@ -128,21 +128,33 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     return;
   }
 
+  const pmTimeoutMs = parseInt(
+    process.env.PM_LLM_TIMEOUT_MS ??
+      process.env.LLM_FETCH_TIMEOUT_MS ??
+      '180000',
+    10,
+  );
   const client = new Anthropic({
     apiKey: input.model.apiKey,
     baseURL: input.model.baseUrl,
+    timeout: pmTimeoutMs,
   });
+
+  const maxTokens = input.isLoopEntry
+    ? parseInt(process.env.PM_LOOP_ENTRY_MAX_TOKENS ?? '1536', 10)
+    : input.model.extra?.max_tokens
+      ? parseInt(input.model.extra.max_tokens, 10)
+      : 8192;
 
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({
       model: input.model.model,
-      max_tokens: input.model.extra?.max_tokens
-        ? parseInt(input.model.extra.max_tokens, 10)
-        : 8192,
+      max_tokens: maxTokens,
       system: PM_SYSTEM_PROMPT,
       tools: [REQUEST_HUMAN_HELP_ANTHROPIC_TOOL],
       messages: [{ role: 'user', content: userContent }],
+      signal: input.signal,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
