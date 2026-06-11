@@ -97,6 +97,12 @@ export class LoopController {
     return project;
   }
 
+  @Delete('projects/:id')
+  async deleteProject(@Param('id') id: string) {
+    await this.loopService.deleteProject(id);
+    return { ok: true };
+  }
+
   @Get('projects/:id/loops')
   async listLoops(@Param('id') projectId: string) {
     const project = await this.loopService.getProject(projectId);
