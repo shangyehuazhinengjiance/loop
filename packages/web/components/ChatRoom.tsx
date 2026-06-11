@@ -351,14 +351,6 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return true;
   }
 
-  function canConfirmMasterMrMerged(): boolean {
-    if (!user || !isMasterMrMergePending()) return false;
-    if (deployConfig?.masterMergeAssigneeUserId) {
-      return deployConfig.masterMergeAssigneeUserId === user.userId;
-    }
-    return true;
-  }
-
   function isLatestMrMergeMessage(message: Message): boolean {
     const last = [...messages]
       .reverse()

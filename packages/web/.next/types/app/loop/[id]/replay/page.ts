@@ -1,4 +1,4 @@
-// File: d:\loop\packages\web\app\loop\[id]\replay\page.tsx
+// File: D:\loop\packages\web\app\loop\[id]\replay\page.tsx
 import * as entry from '../../../../../../app/loop/[id]/replay/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

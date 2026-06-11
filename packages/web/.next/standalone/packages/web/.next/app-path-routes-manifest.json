@@ -1,6 +1,6 @@
 {
-  "/_not-found/page": "/_not-found",
   "/loop/[id]/page": "/loop/[id]",
   "/loop/[id]/replay/page": "/loop/[id]/replay",
-  "/page": "/"
+  "/page": "/",
+  "/_not-found/page": "/_not-found"
 }
