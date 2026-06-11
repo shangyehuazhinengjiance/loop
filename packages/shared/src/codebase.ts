@@ -9,3 +9,8 @@ export const PROJECT_REQUIREMENTS_SUMMARY_FILE = 'requirements-summary.md';
 
 /** 单 Loop 需求/交付总结目录（位于 _project-cache/{projectId}/loops/） */
 export const PROJECT_LOOP_SUMMARIES_DIR = 'loops';
+
+/** 创建 Loop 时用户粘贴的外部需求文档（相对工作区根目录） */
+export function loopInputRequirementsRelPath(loopId: string): string {
+  return `docs/loop/${loopId}/INPUT_REQUIREMENTS.md`;
+}

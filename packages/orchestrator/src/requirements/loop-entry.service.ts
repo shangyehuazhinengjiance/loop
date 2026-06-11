@@ -4,7 +4,7 @@ import { ChatService } from '../chat/chat.service.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { PhaseService } from '../phase/phase.service.js';
 
-/** 成员进入 Loop 时：启动阶段机并触发 PM 阅读项目需求总结 */
+/** 成员进入 Loop 时：启动阶段机并触发 PM（阅读项目总结 / 熟悉导入需求） */
 @Injectable()
 export class LoopEntryService {
   constructor(

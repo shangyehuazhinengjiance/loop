@@ -11,6 +11,7 @@ import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
 import { WorkspaceJobService } from '../workspace/workspace-job.service.js';
 import { LoopMemberService } from '../member/loop-member.service.js';
+import { InputRequirementsService } from '../requirements/input-requirements.service.js';
 
 @Injectable()
 export class LoopService {
@@ -24,9 +25,17 @@ export class LoopService {
     private readonly codebaseSummary: CodebaseSummaryService,
     private readonly workspaceJobs: WorkspaceJobService,
     private readonly memberService: LoopMemberService,
+    private readonly inputRequirements: InputRequirementsService,
   ) {}
 
-  async createLoop(projectId: string, title: string): Promise<LoopRow> {
+  async createLoop(
+    projectId: string,
+    title: string,
+    options?: {
+      inputRequirements?: string;
+      inputRequirementsTitle?: string;
+    },
+  ): Promise<LoopRow> {
     const project = await this.projectRepo.findById(projectId);
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
@@ -97,6 +106,24 @@ export class LoopService {
           `[loop] 未配置 Git 远程仓库，工作区为空（仅本地 git）。` +
             ` 请配置 GIT_DEFAULT_REMOTE_URL 或 project.gitConfig.remoteUrl。`,
         );
+      }
+    }
+
+    if (options?.inputRequirements?.trim()) {
+      this.chatService.emitProcessing({
+        loopId: loop.id,
+        active: true,
+        label: '正在保存导入的需求文档…',
+      });
+      try {
+        await this.inputRequirements.ingestOnCreate({
+          loopId: loop.id,
+          loopTitle: title,
+          content: options.inputRequirements,
+          requirementsTitle: options.inputRequirementsTitle,
+        });
+      } finally {
+        this.chatService.emitProcessing({ loopId: loop.id, active: false });
       }
     }
 

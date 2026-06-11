@@ -100,9 +100,17 @@ export class LoopController {
   @Post('projects/:id/loops')
   async createLoop(
     @Param('id') projectId: string,
-    @Body() body: { title: string },
+    @Body()
+    body: {
+      title: string;
+      inputRequirements?: string;
+      inputRequirementsTitle?: string;
+    },
   ) {
-    return this.loopService.createLoop(projectId, body.title);
+    return this.loopService.createLoop(projectId, body.title, {
+      inputRequirements: body.inputRequirements,
+      inputRequirementsTitle: body.inputRequirementsTitle,
+    });
   }
 
   @Get('loops/:id')

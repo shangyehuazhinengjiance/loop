@@ -69,6 +69,7 @@ export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
     memberRoster: input.memberRoster,
     projectRequirementsSummary: input.projectRequirementsSummary,
     isLoopEntry: input.isLoopEntry,
+    inputRequirements: loop.context.inputRequirements,
   });
 
   if (input.model.runtime === 'client-sdk') {

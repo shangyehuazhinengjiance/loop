@@ -34,6 +34,7 @@ import { PrdPublishService } from './development/prd-publish.service.js';
 import { DevelopmentService } from './development/development.service.js';
 import { RequirementsSummaryService } from './requirements/requirements-summary.service.js';
 import { LoopEntryService } from './requirements/loop-entry.service.js';
+import { InputRequirementsService } from './requirements/input-requirements.service.js';
 
 @Module({
   controllers: [LoopController, AgentController, ChatSseController],
@@ -70,6 +71,7 @@ import { LoopEntryService } from './requirements/loop-entry.service.js';
     DevelopmentService,
     RequirementsSummaryService,
     LoopEntryService,
+    InputRequirementsService,
   ],
 })
 export class AppModule {}

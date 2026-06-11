@@ -122,6 +122,17 @@ export interface ExternalDevelopmentInfo {
   targetBranch: string;
 }
 
+/** 创建 Loop 时由产品同学粘贴的外部需求（PM 首轮先熟悉，再整理为正式 PRD） */
+export interface InputRequirementsDocument {
+  title: string;
+  content: string;
+  source: 'create_form';
+  savedAt: string;
+  /** 工作区内相对路径，如 docs/loop/{id}/INPUT_REQUIREMENTS.md */
+  gitPath: string;
+  commitSha?: string;
+}
+
 /** development 阶段子状态（顶层 phase 仍为 development） */
 export interface DevelopmentConfig {
   /** 未设置 = 等待 PRD 确认人选择开发模式 */
@@ -139,6 +150,8 @@ export interface LoopContext {
   opsSessionId?: string;
   deployment?: DeploymentInfo;
   development?: DevelopmentConfig;
+  /** 创建时导入的外部需求文档（已写入 Git 工作区） */
+  inputRequirements?: InputRequirementsDocument;
 }
 
 export interface LoopGitConfig {

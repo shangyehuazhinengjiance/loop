@@ -63,12 +63,16 @@ export async function generateLoopDeliverySummary(input: {
 ## 遗留事项（无则写「无」）`;
 
   const prd = input.context.prd;
+  const imported = input.context.inputRequirements;
   const tasks = input.context.tasks ?? [];
   const dep = input.context.deployment;
 
   const user = [
     `Loop ID: ${input.loopId}`,
     `标题: ${input.loopTitle}`,
+    imported
+      ? `## 创建时导入的需求\n${imported.title}\n路径: ${imported.gitPath}\n${imported.content}`
+      : '',
     prd ? `## PRD\n${prd.title}\n${prd.content}` : '## PRD\n（无）',
     tasks.length
       ? `## 任务\n${tasks.map((t) => `- [${t.status}] ${t.title}: ${t.description}`).join('\n')}`
