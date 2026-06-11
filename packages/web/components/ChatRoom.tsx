@@ -644,6 +644,30 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     }
   }
 
+  async function retryLoopContextSync() {
+    if (!user || busy || phase !== 'done') return;
+    setClientPending('正在重试 .loop 知识库同步…');
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/loop-context/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.userId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message ?? `重试失败 (${res.status})`);
+        return;
+      }
+      const data = (await res.json()) as { started?: boolean; message?: string };
+      if (data.started === false) {
+        alert(data.message ?? '同步正在进行中');
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
+    }
+  }
+
   async function recoverLoop() {
     if (!user || busy) return;
     setClientPending('正在恢复流程…');
@@ -889,6 +913,27 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             <option value="requirement">requirement</option>
             <option value="development">development</option>
           </select>
+          {phase === 'done' && (
+            <button
+              type="button"
+              onClick={() => void retryLoopContextSync()}
+              disabled={busy}
+              title="重新调用大模型更新 .loop/ 四个文件并创建合并 MR"
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid #388bfd',
+                background: '#0d2847',
+                color: busy ? '#8b949e' : '#58a6ff',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+              }}
+            >
+              重试 .loop 同步
+            </button>
+          )}
           {shouldOfferRecover() && (
             <button
               type="button"

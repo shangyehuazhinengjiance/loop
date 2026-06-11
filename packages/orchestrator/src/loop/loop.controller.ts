@@ -33,6 +33,7 @@ import { LoopEntryService } from '../requirements/loop-entry.service.js';
 import { LoopRecoveryService } from '../recovery/loop-recovery.service.js';
 import { LoopProgressService } from '../chat/loop-progress.service.js';
 import { PmUnderstandingService } from '../requirements/pm-understanding.service.js';
+import { LoopDotLoopService } from '../loop-context/loop-dot-loop.service.js';
 import type { DevelopmentMode } from '@loop/shared';
 
 @Controller('api')
@@ -56,6 +57,7 @@ export class LoopController {
     private readonly loopRecovery: LoopRecoveryService,
     private readonly loopProgress: LoopProgressService,
     private readonly pmUnderstanding: PmUnderstandingService,
+    private readonly loopDotLoop: LoopDotLoopService,
   ) {}
 
   @Get('projects')
@@ -272,6 +274,16 @@ export class LoopController {
     if (!body.userId) throw new BadRequestException('userId required');
     await this.memberService.requireMember(id, body.userId);
     return this.loopRecovery.recover(id, body.userId);
+  }
+
+  @Post('loops/:id/loop-context/retry')
+  async retryLoopContextSync(
+    @Param('id') id: string,
+    @Body() body: { userId: string },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    await this.memberService.requireMember(id, body.userId);
+    return this.loopDotLoop.retrySync(id, body.userId);
   }
 
   @Post('loops/:id/agent/blocker')
