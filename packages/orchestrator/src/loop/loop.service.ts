@@ -268,6 +268,14 @@ export class LoopService {
     return this.projectRepo.findById(projectId);
   }
 
+  async deleteLoop(loopId: string): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) {
+      throw new Error(`Loop not found: ${loopId}`);
+    }
+    await this.loopRepo.delete(loopId);
+  }
+
   async listProjects() {
     return this.projectRepo.listAll();
   }

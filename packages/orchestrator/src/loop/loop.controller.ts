@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -160,6 +161,12 @@ export class LoopController {
   @Post('loops/:id/start')
   async startLoop(@Param('id') id: string) {
     return this.loopService.startLoop(id);
+  }
+
+  @Delete('loops/:id')
+  async deleteLoop(@Param('id') id: string) {
+    await this.loopService.deleteLoop(id);
+    return { ok: true };
   }
 
   /** 默认异步（202），避免 clone + 摘要生成超时；?sync=true 保持旧行为 */
