@@ -70,4 +70,8 @@ export class ProjectRepository {
     );
     return mapRow(row);
   }
+
+  async delete(id: string): Promise<void> {
+    await dbQuery(this.pool, 'DELETE FROM projects WHERE id = ?', [id]);
+  }
 }
