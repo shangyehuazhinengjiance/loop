@@ -286,6 +286,21 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return blocker.assigneeUserId === user.userId;
   }
 
+  function shouldOfferRecover(): boolean {
+    if (loopStatus === 'blocked') return true;
+    const step = deployConfig?.step;
+    if (
+      phase === 'deployment' &&
+      (step === 'awaiting_test_deploy' || step === 'awaiting_prod_deploy')
+    ) {
+      return true;
+    }
+    if (phase === 'deployment' && !step && !deployConfig?.mergeRequest) {
+      return true;
+    }
+    return false;
+  }
+
   function canApproveTest(): boolean {
     if (!user || !isAwaitingTestApproval()) return false;
     if (deployConfig?.testApproverUserId) {
@@ -522,6 +537,33 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     }
   }
 
+  async function recoverLoop() {
+    if (!user || busy) return;
+    setClientPending('正在恢复流程…');
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/recover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.userId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        actions?: string[];
+        hints?: string[];
+      };
+      if (!res.ok) {
+        alert(data.message ?? `恢复失败 (${res.status})`);
+        return;
+      }
+      if (data.hints?.length) {
+        alert(['已执行：', ...(data.actions ?? []), '', '提示：', ...data.hints].join('\n'));
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
+    }
+  }
+
   async function resolveBlocker() {
     if (!user || busy) return;
     const note = prompt('处理说明（可选）：') ?? undefined;
@@ -714,6 +756,27 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             <option value="requirement">requirement</option>
             <option value="development">development</option>
           </select>
+          {shouldOfferRecover() && (
+            <button
+              type="button"
+              onClick={() => void recoverLoop()}
+              disabled={busy}
+              title="解除阻塞并重新激活 Agent / 重试卡住的部署步骤"
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid #d29922',
+                background: '#3d2a00',
+                color: busy ? '#8b949e' : '#d29922',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+              }}
+            >
+              恢复流程
+            </button>
+          )}
           <button
             onClick={rollback}
             disabled={busy}

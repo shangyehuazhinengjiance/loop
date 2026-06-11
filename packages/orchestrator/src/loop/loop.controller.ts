@@ -29,6 +29,7 @@ import { AgentRunnerService } from '../agent/agent-runner.service.js';
 import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js';
 import { DevelopmentService } from '../development/development.service.js';
 import { LoopEntryService } from '../requirements/loop-entry.service.js';
+import { LoopRecoveryService } from '../recovery/loop-recovery.service.js';
 import type { DevelopmentMode } from '@loop/shared';
 
 @Controller('api')
@@ -49,6 +50,7 @@ export class LoopController {
     private readonly codebaseSummary: CodebaseSummaryService,
     private readonly developmentService: DevelopmentService,
     private readonly loopEntryService: LoopEntryService,
+    private readonly loopRecovery: LoopRecoveryService,
   ) {}
 
   @Get('projects')
@@ -237,11 +239,22 @@ export class LoopController {
     @Body() body: { userId: string; note?: string },
   ) {
     if (!body.userId) throw new BadRequestException('userId required');
+    await this.memberService.requireMember(id, body.userId);
     return this.blockerService.resolve({
       loopId: id,
       userId: body.userId,
       note: body.note,
     });
+  }
+
+  @Post('loops/:id/recover')
+  async recoverLoop(
+    @Param('id') id: string,
+    @Body() body: { userId: string },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    await this.memberService.requireMember(id, body.userId);
+    return this.loopRecovery.recover(id, body.userId);
   }
 
   @Post('loops/:id/agent/blocker')

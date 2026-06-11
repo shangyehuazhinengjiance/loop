@@ -313,6 +313,15 @@ export class DeploymentService {
     });
   }
 
+  /** 重新激活 Ops Agent（测试/生产部署卡住时） */
+  async resumeOpsDeploy(
+    loopId: string,
+    userId: string,
+    target: 'test' | 'production',
+  ): Promise<void> {
+    await this.triggerOpsDeploy(loopId, userId, target);
+  }
+
   private async triggerOpsDeploy(
     loopId: string,
     userId: string,

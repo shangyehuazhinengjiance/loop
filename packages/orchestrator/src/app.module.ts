@@ -35,6 +35,7 @@ import { DevelopmentService } from './development/development.service.js';
 import { RequirementsSummaryService } from './requirements/requirements-summary.service.js';
 import { LoopEntryService } from './requirements/loop-entry.service.js';
 import { InputRequirementsService } from './requirements/input-requirements.service.js';
+import { LoopRecoveryService } from './recovery/loop-recovery.service.js';
 
 @Module({
   controllers: [LoopController, AgentController, ChatSseController],
@@ -72,6 +73,7 @@ import { InputRequirementsService } from './requirements/input-requirements.serv
     RequirementsSummaryService,
     LoopEntryService,
     InputRequirementsService,
+    LoopRecoveryService,
   ],
 })
 export class AppModule {}
