@@ -1256,7 +1256,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
               scrollMarginTop: 80,
             }}
           >
-            <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, justifyContent: m.sender.id === user?.userId ? 'flex-end' : 'flex-start' }}>
               <span>
                 {m.sender.displayName} · {m.phase}
                 {m.content.type !== 'text' &&
