@@ -23,6 +23,7 @@ export interface ChatMessageModel {
     body: string;
     actions?: Action[];
     mentions?: string[];
+    sdkMessageType?: string;
   };
   phase: string;
   metadata?: { timestamp?: string; sdkMessageType?: string };

@@ -39,7 +39,11 @@ export function ChatProcessLogGroup({ messages }: ChatProcessLogGroupProps) {
         <span className="chat-process-log__summary">
           <strong>{senderLabel}</strong>
           <span className="chat-process-log__status">
-            {expanded ? `共 ${messages.length} 条执行记录` : summary || '执行中…'}
+            {expanded
+              ? `共 ${messages.length} 条执行记录`
+              : messages.length > 1
+                ? `${messages.length} 条 · ${summary || '执行中…'}`
+                : summary || '执行中…'}
           </span>
         </span>
         {timeLabel && <span className="chat-process-log__time">{timeLabel}</span>}

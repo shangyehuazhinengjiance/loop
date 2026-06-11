@@ -87,7 +87,8 @@ export class MessageRepository {
   }
 
   toLoopMessage(row: MessageRow, displayName: string): LoopMessage {
-    const content = row.content as LoopMessage['content'];
+    const raw = row.content as LoopMessage['content'];
+    const { sdkMessageType, ...content } = raw;
     return {
       id: row.id,
       loopId: row.loop_id,
@@ -100,6 +101,7 @@ export class MessageRepository {
       content,
       metadata: {
         timestamp: row.created_at.toISOString(),
+        ...(sdkMessageType ? { sdkMessageType } : {}),
       },
     };
   }
