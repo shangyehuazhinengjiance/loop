@@ -1,11 +1,12 @@
 import type { LoopMember, ResolvedModelConfig } from '@loop/shared';
 import { fetchWithTimeout, REQUEST_HUMAN_HELP_OPENAI_TOOL } from '@loop/shared';
+import { finishPmLoopEntry } from './finish-loop-entry.js';
+import { finishPmPrd } from './finish-prd.js';
 import { summarizeOpenAIResponse } from './debug.js';
 import { handlePmHumanHelp } from './human-help.js';
 import { notifyPmFailure } from './notify-failure.js';
 import { PM_SYSTEM_PROMPT } from './prompts.js';
 import type { OrchestratorApi } from './orchestrator-api.js';
-import { parsePrdAndTasks } from './orchestrator-api.js';
 
 interface ChatCompletionResponse {
   choices?: {
@@ -189,24 +190,9 @@ export async function runPmAgentOpenAI(input: {
   }
 
   if (input.isLoopEntry) {
-    await input.api.postAgentMessage(
-      input.loopId,
-      { type: 'text', body: text },
-      input.phase,
-    );
+    await finishPmLoopEntry(input.api, input.loopId, input.phase, text);
     return;
   }
 
-  const loop = await input.api.getLoop(input.loopId);
-  const { prd, tasks } = parsePrdAndTasks(text);
-  await input.api.updateContext(input.loopId, { ...loop.context, prd, tasks });
-  await input.api.postAgentMessage(
-    input.loopId,
-    {
-      type: 'artifact',
-      body: text,
-      actions: [{ id: 'approve-prd', label: '确认需求', action: 'approve_prd' }],
-    },
-    input.phase,
-  );
+  await finishPmPrd(input.api, input.loopId, input.phase, text);
 }

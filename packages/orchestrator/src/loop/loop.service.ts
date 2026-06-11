@@ -12,6 +12,7 @@ import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js'
 import { WorkspaceJobService } from '../workspace/workspace-job.service.js';
 import { LoopMemberService } from '../member/loop-member.service.js';
 import { InputRequirementsService } from '../requirements/input-requirements.service.js';
+import { LoopProgressService } from '../chat/loop-progress.service.js';
 
 @Injectable()
 export class LoopService {
@@ -26,6 +27,7 @@ export class LoopService {
     private readonly workspaceJobs: WorkspaceJobService,
     private readonly memberService: LoopMemberService,
     private readonly inputRequirements: InputRequirementsService,
+    private readonly progress: LoopProgressService,
   ) {}
 
   async createLoop(
@@ -50,6 +52,12 @@ export class LoopService {
     try {
       let initResult: Awaited<ReturnType<GitService['initLoopWorkspace']>>;
       if (gitConfig?.remoteUrl) {
+        await this.progress.publish({
+          loopId: loop.id,
+          phase: loop.phase,
+          label: '正在 clone 远程仓库并初始化工作区…',
+          detail: `仓库：\`${gitConfig.remoteUrl}\``,
+        });
         this.chatService.emitProcessing({
           loopId: loop.id,
           active: true,
@@ -60,10 +68,23 @@ export class LoopService {
         } finally {
           this.chatService.emitProcessing({ loopId: loop.id, active: false });
         }
+        await this.progress.publish({
+          loopId: loop.id,
+          phase: loop.phase,
+          label: 'Git 工作区已就绪',
+          detail: `分支：\`loop/${loop.id}\``,
+          updateBanner: false,
+        });
       } else {
         initResult = await this.gitService.initLoopWorkspace(loop.id);
       }
       if (gitConfig?.remoteUrl) {
+        await this.progress.publish({
+          loopId: loop.id,
+          phase: loop.phase,
+          label: '正在生成代码库摘要（调用大模型）…',
+          detail: '供 Dev Agent 快速理解项目结构，可能需要 1–2 分钟。',
+        });
         const summary = await this.tryEnsureCodebaseSummary({
           projectId,
           loopId: loop.id,
@@ -72,6 +93,17 @@ export class LoopService {
           remoteUrl: gitConfig.remoteUrl,
           projectModelConfig: project.model_config,
         });
+        if (summary) {
+          await this.progress.publish({
+            loopId: loop.id,
+            phase: loop.phase,
+            label: summary.cached
+              ? '已复用项目代码库摘要'
+              : '代码库摘要已生成',
+            detail: `路径：\`${summary.path}\``,
+            updateBanner: false,
+          });
+        }
         const summaryNote = summary
           ? summary.cached
             ? ` 已复用项目代码库摘要（${summary.path}）。`

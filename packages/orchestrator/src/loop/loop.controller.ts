@@ -30,6 +30,8 @@ import { CodebaseSummaryService } from '../codebase/codebase-summary.service.js'
 import { DevelopmentService } from '../development/development.service.js';
 import { LoopEntryService } from '../requirements/loop-entry.service.js';
 import { LoopRecoveryService } from '../recovery/loop-recovery.service.js';
+import { LoopProgressService } from '../chat/loop-progress.service.js';
+import { PmUnderstandingService } from '../requirements/pm-understanding.service.js';
 import type { DevelopmentMode } from '@loop/shared';
 
 @Controller('api')
@@ -51,6 +53,8 @@ export class LoopController {
     private readonly developmentService: DevelopmentService,
     private readonly loopEntryService: LoopEntryService,
     private readonly loopRecovery: LoopRecoveryService,
+    private readonly loopProgress: LoopProgressService,
+    private readonly pmUnderstanding: PmUnderstandingService,
   ) {}
 
   @Get('projects')
@@ -376,6 +380,49 @@ export class LoopController {
     @Body() body: { context: LoopContext },
   ) {
     return this.loopService.updateContext(id, body.context);
+  }
+
+  @Post('loops/:id/progress')
+  async reportProgress(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      agentId?: string;
+      phase?: string;
+      label: string;
+      detail?: string;
+      updateBanner?: boolean;
+    },
+  ) {
+    const loop = await this.loopService.getLoop(id);
+    if (!loop) throw new NotFoundException('Loop not found');
+    if (!body.label?.trim()) {
+      throw new BadRequestException('label required');
+    }
+    await this.loopProgress.publish({
+      loopId: id,
+      phase: body.phase ?? loop.phase,
+      agentId: body.agentId,
+      label: body.label.trim(),
+      detail: body.detail,
+      updateBanner: body.updateBanner,
+    });
+    return { ok: true };
+  }
+
+  @Post('loops/:id/requirements/understanding')
+  async savePmUnderstanding(
+    @Param('id') id: string,
+    @Body() body: { content?: string },
+  ) {
+    if (!body.content?.trim()) {
+      throw new BadRequestException('content required');
+    }
+    const gitPath = await this.pmUnderstanding.saveUnderstanding(
+      id,
+      body.content.trim(),
+    );
+    return { ok: true, gitPath };
   }
 
   @Post('loops/:id/agent-messages')

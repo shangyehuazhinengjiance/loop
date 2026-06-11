@@ -275,7 +275,9 @@ export type MessageContentType =
   | 'mention'
   | 'phase_transition'
   | 'approval'
-  | 'rollback';
+  | 'rollback'
+  /** 流程步骤进度（需求阶段 PM 总结、Git 推送等） */
+  | 'progress';
 
 export interface Action {
   id: string;

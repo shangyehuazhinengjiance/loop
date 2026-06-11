@@ -23,6 +23,44 @@ export class OrchestratorApi {
     return res.json() as Promise<LoopMessage[]>;
   }
 
+  async reportProgress(
+    loopId: string,
+    phase: string,
+    input: {
+      label: string;
+      detail?: string;
+      updateBanner?: boolean;
+    },
+  ): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'pm-agent',
+        phase,
+        ...input,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`reportProgress failed: ${res.status}`);
+    }
+  }
+
+  async saveUnderstanding(loopId: string, content: string): Promise<void> {
+    const res = await fetch(
+      `${this.baseUrl}/api/loops/${loopId}/requirements/understanding`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`saveUnderstanding: ${res.status} ${text.slice(0, 200)}`);
+    }
+  }
+
   async postAgentMessage(
     loopId: string,
     content: LoopMessage['content'],
