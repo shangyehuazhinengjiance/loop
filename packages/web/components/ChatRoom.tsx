@@ -8,7 +8,10 @@ import { ChatInput, type HumanMentionOption } from './ChatInput';
 import { LoopJoinPrompt } from './LoopJoinPrompt';
 import { LoopMembersPanel } from './LoopMembersPanel';
 import { ChatMessageBubble } from './ChatMessageBubble';
+import { ChatProcessLogGroup } from './ChatProcessLogGroup';
 import { ProcessingBanner } from './ProcessingBanner';
+import { formatLoopCreatedAt } from '../lib/chat-time';
+import { groupChatMessages } from '../lib/chat-message-groups';
 import { UserIdentityPrompt } from './UserIdentityPrompt';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001';
@@ -125,6 +128,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [devConfig, setDevConfig] = useState<DevelopmentConfig | null>(null);
   const [deployConfig, setDeployConfig] = useState<DeploymentConfig | null>(null);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
+  const [loopTitle, setLoopTitle] = useState('');
+  const [loopCreatedAt, setLoopCreatedAt] = useState<string | undefined>();
   const messageListRef = useRef<HTMLDivElement>(null);
   const [externalAssigneeId, setExternalAssigneeId] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
@@ -143,6 +148,12 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       r.json(),
     );
     setPhase(loop.phase);
+    setLoopTitle(loop.title ?? '');
+    const created =
+      loop.created_at ?? loop.createdAt ?? loop.updated_at ?? loop.updatedAt;
+    setLoopCreatedAt(
+      typeof created === 'string' ? created : created?.toISOString?.(),
+    );
     setLoopStatus(loop.status ?? 'active');
     setBlocker(loop.blocker ?? null);
     setAgentProcessing(
@@ -813,12 +824,22 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           gap: 8,
         }}
       >
-        <div>
-          <Link href="/" style={{ color: '#8b949e', fontSize: 13, marginRight: 12 }}>
-            ← 首页
-          </Link>
-          <strong>Loop</strong>{' '}
-          <span style={{ color: '#8b949e', fontSize: 13 }}>{loopId.slice(0, 8)}…</span>
+        <div className="chat-loop-header">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+            <Link href="/" style={{ color: '#8b949e', fontSize: 13, flexShrink: 0 }}>
+              ← 首页
+            </Link>
+            <strong className="chat-loop-header__title" title={loopTitle || loopId}>
+              {loopTitle || `Loop ${loopId.slice(0, 8)}…`}
+            </strong>
+          </div>
+          <div className="chat-loop-header__meta">
+            {loopCreatedAt ? (
+              <span>创建于 {formatLoopCreatedAt(loopCreatedAt)}（UTC+8）</span>
+            ) : (
+              <span style={{ color: '#6e7681' }}>{loopId.slice(0, 8)}…</span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <button
@@ -1337,10 +1358,22 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       )}
 
       <div ref={messageListRef} className="chat-msg-list">
-        {messages.map((m, index) => {
+        {groupChatMessages(messages).map((item, index, items) => {
+          const prevItem = index > 0 ? items[index - 1] : undefined;
+          const prevMessage =
+            prevItem?.kind === 'message'
+              ? prevItem.message
+              : prevItem?.kind === 'process-log'
+                ? prevItem.messages[prevItem.messages.length - 1]
+                : undefined;
+
+          if (item.kind === 'process-log') {
+            return <ChatProcessLogGroup key={item.id} messages={item.messages} />;
+          }
+
+          const m = item.message;
           const mentionsYou = Boolean(user && messageMentionsUser(m, user.userId));
           const mentionUnread = pendingMentionIds.includes(m.id);
-          const prevMessage = index > 0 ? messages[index - 1] : undefined;
 
           return (
             <ChatMessageBubble
