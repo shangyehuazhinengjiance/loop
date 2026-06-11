@@ -276,6 +276,18 @@ export class LoopService {
     await this.loopRepo.delete(loopId);
   }
 
+  async deleteProject(projectId: string): Promise<void> {
+    const project = await this.projectRepo.findById(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    const loops = await this.loopRepo.listByProject(projectId);
+    for (const loop of loops) {
+      await this.loopRepo.delete(loop.id);
+    }
+    await this.projectRepo.delete(projectId);
+  }
+
   async listProjects() {
     return this.projectRepo.listAll();
   }

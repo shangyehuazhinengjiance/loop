@@ -276,11 +276,40 @@ export default function HomePage() {
                   background: '#161b22',
                 }}
               >
-                <div style={{ marginBottom: 8 }}>
-                  <strong>{project.name}</strong>
-                  <span style={{ color: '#8b949e', fontSize: 12, marginLeft: 8 }}>
-                    {project.id.slice(0, 8)}…
-                  </span>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>{project.name}</strong>
+                    <span style={{ color: '#8b949e', fontSize: 12, marginLeft: 8 }}>
+                      {project.id.slice(0, 8)}…
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!confirm('确定要删除该项目吗？此操作将同步删除/归档该项目下的所有 Loop 及相关数据，且不可恢复。')) return;
+                      try {
+                        const res = await fetch(`${ORCHESTRATOR}/api/projects/${project.id}`, {
+                          method: 'DELETE',
+                        });
+                        if (!res.ok) throw new Error('删除失败');
+                        alert('删除成功');
+                        void loadProjects();
+                      } catch (e) {
+                        alert(e instanceof Error ? e.message : '删除失败');
+                      }
+                    }}
+                    style={{
+                      fontSize: 12,
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      border: '1px solid #da3633',
+                      color: '#da3633',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    删除项目
+                  </button>
                 </div>
                 {project.gitConfig?.remoteUrl && (
                   <div
