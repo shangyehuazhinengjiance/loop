@@ -7,7 +7,7 @@ import { messageMentionsUser, mentionTag } from '../lib/mentions';
 import { ChatInput, type HumanMentionOption } from './ChatInput';
 import { LoopJoinPrompt } from './LoopJoinPrompt';
 import { LoopMembersPanel } from './LoopMembersPanel';
-import { MarkdownContent } from './MarkdownContent';
+import { ChatMessageBubble } from './ChatMessageBubble';
 import { ProcessingBanner } from './ProcessingBanner';
 import { UserIdentityPrompt } from './UserIdentityPrompt';
 
@@ -1291,108 +1291,57 @@ export function ChatRoom({ loopId }: { loopId: string }) {
         </div>
       )}
 
-      <div ref={messageListRef} style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+      <div ref={messageListRef} className="chat-msg-list">
         {messages.map((m, index) => {
           const mentionsYou = Boolean(user && messageMentionsUser(m, user.userId));
           const mentionUnread = pendingMentionIds.includes(m.id);
-          
-          const prevMessage = index > 0 ? messages[index - 1] : null;
-          const isSameSenderAsPrev = prevMessage && prevMessage.sender.id === m.sender.id && prevMessage.sender.type !== 'system' && m.sender.type !== 'system';
-          
+          const prevMessage = index > 0 ? messages[index - 1] : undefined;
+
           return (
-          <div
-            key={m.id}
-            id={`loop-msg-${m.id}`}
-            style={{
-              marginBottom: isSameSenderAsPrev ? 4 : 16,
-              scrollMarginTop: 80,
-            }}
-          >
-            {!isSameSenderAsPrev && (
-              <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, justifyContent: m.sender.id === user?.userId ? 'flex-end' : 'flex-start' }}>
-                <span>
-                  {m.sender.displayName} · {m.phase}
-                  {m.content.type !== 'text' &&
-                    m.content.type !== 'progress' &&
-                    ` · ${m.content.type}`}
-                  {m.content.type === 'progress' && ' · 进度'}
-                </span>
-                {mentionsYou && (
-                  <span
-                    className="mention-you-pill"
-                    style={{ fontSize: 11, padding: '1px 6px' }}
-                  >
-                    提及你
-                  </span>
-                )}
-              </div>
-            )}
-            <div
-              style={{
-                padding: m.content.type === 'progress' ? '8px 12px' : '10px 14px',
-                borderRadius: 8,
-                background:
-                  m.content.type === 'progress'
-                    ? '#0d1117'
-                    : mentionsYou
-                      ? '#132339'
-                      : m.sender.type === 'human' && m.sender.id === user?.userId
-                        ? '#1a2332'
-                        : m.sender.type === 'human'
-                          ? '#161b22'
-                          : '#1c2128',
-                border:
-                  m.content.type === 'progress'
-                    ? '1px dashed #30363d'
-                    : mentionUnread
-                      ? '1px solid #388bfd'
-                      : mentionsYou
-                        ? '1px solid #388bfd66'
-                        : m.sender.id === user?.userId
-                          ? '1px solid #388bfd66'
-                          : '1px solid #30363d',
-                boxShadow: mentionUnread ? '0 0 0 1px #388bfd44' : undefined,
-                fontSize: m.content.type === 'progress' ? 13 : undefined,
-                color: m.content.type === 'progress' ? '#8b949e' : undefined,
-              }}
-            >
-              <MarkdownContent content={m.content.body} />
-            </div>
-            {m.content.actions
-              ?.filter((a) => shouldShowAction(a.action, m))
-              .map((a) => {
-                const clickable = isActionClickable(a.action);
-                const hint = actionDisabledHint(a.action);
-                return (
-                  <div key={a.id} style={{ marginTop: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => clickable && !busy && void handleAction(a.action)}
-                      disabled={!clickable || busy}
-                      title={hint}
-                      style={{
-                        marginRight: 8,
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        border: `1px solid ${clickable && !busy ? '#238636' : '#484f58'}`,
-                        background: 'transparent',
-                        color: clickable && !busy ? '#3fb950' : '#8b949e',
-                        cursor: clickable && !busy ? 'pointer' : 'not-allowed',
-                      }}
-                    >
-                      {clientPending && APPROVE_PENDING_LABEL[a.action] === clientPending
-                        ? '处理中…'
-                        : a.label}
-                    </button>
-                    {hint && (
-                      <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>
-                        {hint}
+            <ChatMessageBubble
+              key={m.id}
+              message={m}
+              prevMessage={prevMessage}
+              currentUserId={user?.userId}
+              mentionsYou={mentionsYou}
+              mentionUnread={mentionUnread}
+              renderActions={(msg) =>
+                msg.content.actions
+                  ?.filter((a) => shouldShowAction(a.action, msg as Message))
+                  .map((a) => {
+                    const clickable = isActionClickable(a.action);
+                    const hint = actionDisabledHint(a.action);
+                    return (
+                      <div key={a.id} className="chat-action-row">
+                        <button
+                          type="button"
+                          onClick={() => clickable && !busy && void handleAction(a.action)}
+                          disabled={!clickable || busy}
+                          title={hint}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            border: `1px solid ${clickable && !busy ? '#238636' : '#484f58'}`,
+                            background: clickable && !busy ? '#238636' : 'transparent',
+                            color: clickable && !busy ? '#fff' : '#8b949e',
+                            cursor: clickable && !busy ? 'pointer' : 'not-allowed',
+                            fontSize: 13,
+                          }}
+                        >
+                          {clientPending && APPROVE_PENDING_LABEL[a.action] === clientPending
+                            ? '处理中…'
+                            : a.label}
+                        </button>
+                        {hint && (
+                          <div style={{ fontSize: 12, color: '#8b949e', width: '100%' }}>
+                            {hint}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-          </div>
+                    );
+                  })
+              }
+            />
           );
         })}
         <div ref={bottomRef} />
