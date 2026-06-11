@@ -1,5 +1,23 @@
 node_modules/
 dist/
+
+# Next.js
+.next/
+**/.next/
+
+# TypeScript
+*.tsbuildinfo
+
+# Monorepo / tooling
+.turbo/
+
+# Test
+coverage/
+
+# Other build outputs
+out/
+build/
+
 .env
 deploy/k8s/secret.yaml
 scripts/sync.env

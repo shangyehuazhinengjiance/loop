@@ -13,7 +13,8 @@
     "db:migrate": "npm run migrate -w @loop/orchestrator",
     "test": "npm run test --workspaces --if-present",
     "e2e": "powershell -File scripts/e2e-smoke.ps1",
-    "lockfile:sync": "node scripts/sync-lockfile.mjs"
+    "lockfile:sync": "node scripts/sync-lockfile.mjs",
+    "clean:build": "node scripts/cleanup-build-artifacts.mjs"
   },
   "engines": {
     "node": ">=20"
