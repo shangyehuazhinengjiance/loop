@@ -1,6 +1,0 @@
-{
-  "/loop/[id]/page": "/loop/[id]",
-  "/loop/[id]/replay/page": "/loop/[id]/replay",
-  "/page": "/",
-  "/_not-found/page": "/_not-found"
-}
