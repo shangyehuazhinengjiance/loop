@@ -269,12 +269,21 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     );
   }
 
+  function isMrMergePending(): boolean {
+    return phase === 'deployment' && deployConfig?.step === 'awaiting_mr_merge';
+  }
+
   function canConfirmMrMerged(): boolean {
-    return Boolean(
-      user &&
-        deployConfig?.step === 'awaiting_mr_merge' &&
-        deployConfig.mergeAssigneeUserId === user.userId,
-    );
+    if (!user || !isMrMergePending()) return false;
+    if (deployConfig?.mergeAssigneeUserId) {
+      return deployConfig.mergeAssigneeUserId === user.userId;
+    }
+    return true;
+  }
+
+  function canResolveBlocker(): boolean {
+    if (!user || !blocker) return false;
+    return blocker.assigneeUserId === user.userId;
   }
 
   function canApproveTest(): boolean {
@@ -831,42 +840,157 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                 <span> 分支：{devConfig.external.targetBranch}</span>
               )}
             </div>
-          ) : blocker.kind === 'human_decision' && phase === 'deployment' ? (
+          ) : isMrMergePending() ? (
             <div style={{ color: '#8b949e', marginTop: 8, fontSize: 13 }}>
-              请在 Git 平台合并 MR 后，由合并负责人在下方点击「MR 已合并」。
-              {deployConfig?.mergeRequest?.url && (
-                <div style={{ marginTop: 4 }}>
-                  <a
-                    href={deployConfig.mergeRequest.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: '#58a6ff' }}
-                  >
-                    打开 MR #{deployConfig.mergeRequest.number}
-                  </a>
-                </div>
-              )}
+              请在 Git 平台合并 MR 后，点击下方「部署操作」栏中的「MR 已合并」。
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={resolveBlocker}
-              disabled={busy}
-              style={{
-                marginTop: 8,
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: '1px solid #9e6a03',
-                background: '#238636',
-                color: '#fff',
-                fontSize: 13,
-                cursor: busy ? 'not-allowed' : 'pointer',
-                opacity: busy ? 0.7 : 1,
-              }}
-            >
-              {clientPending === '正在解除阻塞…' ? '处理中…' : '已解决，解除阻塞'}
-            </button>
+            <div style={{ marginTop: 8 }}>
+              <div style={{ color: '#8b949e', fontSize: 13, marginBottom: 8 }}>
+                {blocker.requestedBy === 'ops-agent'
+                  ? '处理完成后点击「已解决」解除阻塞，再 @ops-agent 继续部署。'
+                  : blocker.requestedBy === 'dev-agent'
+                    ? '处理完成后点击「已解决」解除阻塞，再 @dev-agent 继续。'
+                    : blocker.requestedBy === 'pm-agent'
+                      ? '处理完成后点击「已解决」解除阻塞，再 @pm-agent 继续。'
+                      : '处理完成后点击「已解决」解除阻塞。'}
+              </div>
+              <button
+                type="button"
+                onClick={resolveBlocker}
+                disabled={busy || !canResolveBlocker()}
+                title={
+                  canResolveBlocker()
+                    ? undefined
+                    : `仅 @${blocker.assigneeDisplayName} 可解除阻塞`
+                }
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #9e6a03',
+                  background: '#238636',
+                  color: '#fff',
+                  fontSize: 13,
+                  cursor: busy || !canResolveBlocker() ? 'not-allowed' : 'pointer',
+                  opacity: busy || !canResolveBlocker() ? 0.7 : 1,
+                }}
+              >
+                {clientPending === '正在解除阻塞…' ? '处理中…' : '已解决，解除阻塞'}
+              </button>
+            </div>
           )}
+        </div>
+      )}
+
+      {(isMrMergePending() ||
+        isAwaitingTestApproval() ||
+        isAwaitingProdApproval()) && (
+        <div
+          style={{
+            padding: '12px 20px',
+            borderBottom: '1px solid #30363d',
+            background: '#161b22',
+          }}
+        >
+          <div style={{ fontSize: 13, color: '#8b949e', marginBottom: 10 }}>部署操作</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {isMrMergePending() && deployConfig?.mergeRequest?.url && (
+              <a
+                href={deployConfig.mergeRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#58a6ff', fontSize: 13 }}
+              >
+                打开 MR #{deployConfig.mergeRequest.number}
+              </a>
+            )}
+            {isMrMergePending() && (
+              <button
+                type="button"
+                onClick={() => canConfirmMrMerged() && !busy && void handleAction('confirm_mr_merged')}
+                disabled={!canConfirmMrMerged() || busy}
+                title={actionDisabledHint('confirm_mr_merged')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  border: `1px solid ${canConfirmMrMerged() && !busy ? '#238636' : '#484f58'}`,
+                  background: canConfirmMrMerged() && !busy ? '#238636' : 'transparent',
+                  color: canConfirmMrMerged() && !busy ? '#fff' : '#8b949e',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: canConfirmMrMerged() && !busy ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {clientPending === APPROVE_PENDING_LABEL.confirm_mr_merged
+                  ? '处理中…'
+                  : 'MR 已合并'}
+              </button>
+            )}
+            {isAwaitingTestApproval() && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => canApproveTest() && !busy && void handleAction('approve_test')}
+                  disabled={!canApproveTest() || busy}
+                  title={actionDisabledHint('approve_test')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    border: '1px solid #238636',
+                    background: canApproveTest() && !busy ? '#238636' : 'transparent',
+                    color: canApproveTest() && !busy ? '#fff' : '#8b949e',
+                    fontSize: 13,
+                    cursor: canApproveTest() && !busy ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  测试通过，进入上线
+                </button>
+                <button
+                  type="button"
+                  onClick={() => canApproveTest() && !busy && void handleAction('reject_test')}
+                  disabled={!canApproveTest() || busy}
+                  title={actionDisabledHint('reject_test')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    border: '1px solid #f85149',
+                    background: 'transparent',
+                    color: canApproveTest() && !busy ? '#f85149' : '#8b949e',
+                    fontSize: 13,
+                    cursor: canApproveTest() && !busy ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  测试不通过，回退开发
+                </button>
+              </>
+            )}
+            {isAwaitingProdApproval() && (
+              <button
+                type="button"
+                onClick={() =>
+                  isActionClickable('approve_deploy') &&
+                  !busy &&
+                  void handleAction('approve_deploy')
+                }
+                disabled={!isActionClickable('approve_deploy') || busy}
+                title={actionDisabledHint('approve_deploy')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  border: '1px solid #238636',
+                  background:
+                    isActionClickable('approve_deploy') && !busy ? '#238636' : 'transparent',
+                  color: isActionClickable('approve_deploy') && !busy ? '#fff' : '#8b949e',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor:
+                    isActionClickable('approve_deploy') && !busy ? 'pointer' : 'not-allowed',
+                }}
+              >
+                确认正式上线完成
+              </button>
+            )}
+          </div>
         </div>
       )}
 
