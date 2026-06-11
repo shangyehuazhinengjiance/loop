@@ -3,11 +3,15 @@ export function defaultGitConfigFromEnv(): Record<string, unknown> | undefined {
   const remoteUrl = process.env.GIT_DEFAULT_REMOTE_URL?.trim();
   if (!remoteUrl) return undefined;
 
+  const deploymentExecution = process.env.DEPLOY_EXECUTION_MODE?.trim();
   return {
     remoteUrl,
     defaultBranch: process.env.GIT_DEFAULT_BRANCH?.trim() || 'main',
     credentialRef:
       process.env.GIT_DEFAULT_CREDENTIAL_REF?.trim() || 'GIT_SSH_KEY_PATH',
+    ...(deploymentExecution === 'agent' || deploymentExecution === 'manual'
+      ? { deploymentExecution }
+      : {}),
   };
 }
 

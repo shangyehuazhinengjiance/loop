@@ -13,6 +13,7 @@ const ACTION_REQUIRED_PHASE: Record<
   approve_prd: 'requirement',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
+  confirm_master_mr_merged: 'deployment',
   approve_test: 'deployment',
   reject_test: 'deployment',
   approve_deploy: 'deployment',
@@ -73,11 +74,32 @@ export class ApprovalService {
       return { duplicate: false, action: input.action, phase: loop.phase };
     }
 
+    if (input.action === 'confirm_master_mr_merged') {
+      const dep = loop.context.deployment;
+      if (dep?.step !== 'awaiting_master_mr_merge') {
+        throw new BadRequestException('当前不在等待上线 MR 合并状态');
+      }
+      await this.approvalRepo.create({
+        loopId: input.loopId,
+        action: input.action,
+        approvedBy: input.approvedBy,
+        phase: loop.phase,
+        note: input.note,
+      });
+      await this.deploymentService.confirmMasterMrMerged({
+        loopId: input.loopId,
+        userId: input.approvedBy,
+        note: input.note,
+      });
+      return { duplicate: false, action: input.action, phase: loop.phase };
+    }
+
     if (input.action === 'approve_test') {
       const dep = loop.context.deployment;
       if (
         dep?.step !== 'awaiting_test_approval' &&
-        dep?.step !== 'awaiting_pipeline'
+        dep?.step !== 'awaiting_pipeline' &&
+        dep?.step !== 'awaiting_manual_test_deploy'
       ) {
         throw new BadRequestException('当前不在等待测试环境审批状态');
       }
@@ -96,7 +118,7 @@ export class ApprovalService {
         phase: loop.phase,
         note: input.note,
       });
-      await this.deploymentService.startProdDeploy(
+      await this.deploymentService.onTestApproved(
         input.loopId,
         input.approvedBy,
       );
@@ -107,7 +129,8 @@ export class ApprovalService {
       const dep = loop.context.deployment;
       if (
         dep?.step !== 'awaiting_test_approval' &&
-        dep?.step !== 'awaiting_pipeline'
+        dep?.step !== 'awaiting_pipeline' &&
+        dep?.step !== 'awaiting_manual_test_deploy'
       ) {
         throw new BadRequestException('当前不在等待测试环境审批状态');
       }
@@ -143,10 +166,11 @@ export class ApprovalService {
       if (
         dep?.step &&
         dep.step !== 'awaiting_prod_approval' &&
-        dep.step !== 'awaiting_pipeline'
+        dep.step !== 'awaiting_pipeline' &&
+        dep.step !== 'awaiting_manual_prod_verify'
       ) {
         throw new BadRequestException(
-          '请先完成测试环境审批与生产部署，再确认正式上线',
+          '请先完成测试验证、上线 MR 合并与生产验证，再确认完成',
         );
       }
     }

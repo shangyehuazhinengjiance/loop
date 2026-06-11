@@ -29,7 +29,7 @@ interface LoopSummary {
 interface ProjectSummary {
   id: string;
   name: string;
-  gitConfig?: { remoteUrl?: string };
+  gitConfig?: { remoteUrl?: string; deploymentExecution?: 'manual' | 'agent' };
   createdAt: string;
   loops: LoopSummary[];
 }
@@ -47,6 +47,9 @@ export default function HomePage() {
   const [projectName, setProjectName] = useState('default');
   const [remoteUrl, setRemoteUrl] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
+  const [deploymentExecution, setDeploymentExecution] = useState<'manual' | 'agent'>(
+    'manual',
+  );
   const [existingProjectId, setExistingProjectId] = useState('');
   const [loading, setLoading] = useState(false);
   const [creatingProjectId, setCreatingProjectId] = useState<string | null>(null);
@@ -135,6 +138,7 @@ export default function HomePage() {
         gitConfig.remoteUrl = remoteUrl.trim();
         gitConfig.defaultBranch = defaultBranch.trim() || 'main';
         gitConfig.credentialRef = 'GIT_SSH_KEY_PATH';
+        gitConfig.deploymentExecution = deploymentExecution;
       }
 
       const projectBody: Record<string, unknown> = {
@@ -465,6 +469,21 @@ export default function HomePage() {
                   placeholder="main"
                   style={inputStyle}
                 />
+
+                <label style={{ display: 'block', marginBottom: 8 }}>部署方式</label>
+                <select
+                  value={deploymentExecution}
+                  onChange={(e) =>
+                    setDeploymentExecution(e.target.value as 'manual' | 'agent')
+                  }
+                  style={{ ...inputStyle, marginBottom: 8 }}
+                >
+                  <option value="manual">人工部署（推荐：创建 MR + 通知，人合并/部署/验证）</option>
+                  <option value="agent">Ops Agent 自动部署（需配置 K8s/流水线等）</option>
+                </select>
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: '#8b949e' }}>
+                  人工部署模式下 Ops Agent 只协助创建 MR，不会自动执行 kubectl 等部署操作。
+                </p>
               </>
             )}
 

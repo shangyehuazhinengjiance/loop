@@ -9,12 +9,22 @@ export function resolveOpsDeployTarget(
   return null;
 }
 
-/** 是否处于测试环境人工审批等待态 */
+/** 是否处于测试环境人工审批等待态（含 manual 部署后验证） */
 export function isAwaitingTestApproval(step?: DeploymentStep): boolean {
-  return step === 'awaiting_test_approval' || step === 'awaiting_pipeline';
+  return (
+    step === 'awaiting_test_approval' ||
+    step === 'awaiting_pipeline' ||
+    step === 'awaiting_manual_test_deploy'
+  );
 }
 
 /** 是否处于生产发布最终确认等待态 */
 export function isAwaitingProdApproval(step?: DeploymentStep): boolean {
-  return step === 'awaiting_prod_approval';
+  return (
+    step === 'awaiting_prod_approval' || step === 'awaiting_manual_prod_verify'
+  );
+}
+
+export function isAwaitingMasterMrMerge(step?: DeploymentStep): boolean {
+  return step === 'awaiting_master_mr_merge';
 }

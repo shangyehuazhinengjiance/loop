@@ -46,23 +46,40 @@ export class LoopRecoveryService {
     const dep = fresh.context.deployment;
     const step = dep?.step;
 
+    const manual = dep?.executionMode === 'manual';
+
     if (fresh.phase === 'deployment') {
       if (step === 'awaiting_mr_merge') {
         hints.push(
           '当前等待 MR 合并：请在 Git 平台合并后，点击「部署操作」中的「MR 已合并」，或调用 POST /api/loops/:id/approve（action: confirm_mr_merged）。',
         );
-      } else if (step === 'awaiting_test_approval' || step === 'awaiting_pipeline') {
+      } else if (step === 'awaiting_manual_test_deploy') {
+        hints.push(
+          '当前为人工部署模式：请手动部署测试环境，验证后点击「测试环境验证通过」，或调用 approve（action: approve_test）。',
+        );
+      } else if (step === 'awaiting_master_mr_merge') {
+        hints.push(
+          '当前等待上线 MR 合并：请在 Git 平台合并后，点击「上线 MR 已合并」，或调用 approve（action: confirm_master_mr_merged）。',
+        );
+      } else if (
+        step === 'awaiting_test_approval' ||
+        step === 'awaiting_pipeline'
+      ) {
         hints.push(
           '当前等待测试环境审批：请点击「测试通过」或「测试不通过」，或调用 approve（action: approve_test / reject_test）。',
+        );
+      } else if (step === 'awaiting_manual_prod_verify') {
+        hints.push(
+          '当前等待生产环境验证：验证无误后点击「生产环境验证通过，完成 Loop」，或调用 approve（action: approve_deploy）。',
         );
       } else if (step === 'awaiting_prod_approval') {
         hints.push(
           '当前等待确认正式上线：请点击「确认正式上线完成」，或调用 approve（action: approve_deploy）。',
         );
-      } else if (step === 'awaiting_test_deploy') {
+      } else if (step === 'awaiting_test_deploy' && !manual) {
         await this.deploymentService.resumeOpsDeploy(loopId, userId, 'test');
         actions.push('已重新启动 Ops Agent（测试环境部署）');
-      } else if (step === 'awaiting_prod_deploy') {
+      } else if (step === 'awaiting_prod_deploy' && !manual) {
         await this.deploymentService.resumeOpsDeploy(loopId, userId, 'production');
         actions.push('已重新启动 Ops Agent（生产环境部署）');
       } else if (!step && !dep?.mergeRequest) {

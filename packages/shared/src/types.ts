@@ -40,6 +40,7 @@ export type ApprovalActionType =
   | 'approve_prd'
   | 'approve_dev'
   | 'confirm_mr_merged'
+  | 'confirm_master_mr_merged'
   | 'approve_test'
   | 'reject_test'
   | 'approve_deploy'
@@ -84,14 +85,24 @@ export interface Task {
   assigneeDisplayName?: string;
 }
 
+/** manual：人合并/部署；agent：Ops Agent 自动部署 */
+export type DeploymentExecutionMode = 'manual' | 'agent';
+
 export type DeploymentStep =
   | 'awaiting_mr_merge'
   /** @deprecated 旧流程，等同 awaiting_test_approval */
   | 'awaiting_pipeline'
+  /** agent 模式：Ops 部署测试环境 */
   | 'awaiting_test_deploy'
   | 'awaiting_test_approval'
   | 'awaiting_prod_deploy'
-  | 'awaiting_prod_approval';
+  | 'awaiting_prod_approval'
+  /** manual 模式：等人部署并验证测试环境 */
+  | 'awaiting_manual_test_deploy'
+  /** manual 模式：等人合并 test → master MR */
+  | 'awaiting_master_mr_merge'
+  /** manual 模式：等人验证生产环境 */
+  | 'awaiting_manual_prod_verify';
 
 export type OpsDeployTarget = 'test' | 'production';
 
@@ -108,16 +119,29 @@ export interface DeploymentInfo {
   stagingUrl?: string;
   productionUrl?: string;
   status: 'pending' | 'staging' | 'production' | 'failed';
+  /** manual | agent，进入 deployment 时从项目配置写入 */
+  executionMode?: DeploymentExecutionMode;
   /** 部署目标分支（默认 test） */
   targetBranch?: string;
+  productionBranch?: string;
   commitSha?: string;
   /** deployment 子步骤 */
   step?: DeploymentStep;
+  /** loop → test */
   mergeRequest?: MergeRequestInfo;
   mergeAssigneeUserId?: string;
   mergeAssigneeDisplayName?: string;
   mrMergedAt?: string;
   mrMergedBy?: string;
+  /** manual：测试环境部署/验证负责人 */
+  deployAssigneeUserId?: string;
+  deployAssigneeDisplayName?: string;
+  /** test → master */
+  masterMergeRequest?: MergeRequestInfo;
+  masterMergeAssigneeUserId?: string;
+  masterMergeAssigneeDisplayName?: string;
+  masterMrMergedAt?: string;
+  masterMrMergedBy?: string;
   testDeployedAt?: string;
   testApprovedAt?: string;
   testApprovedBy?: string;

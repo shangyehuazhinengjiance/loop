@@ -19,6 +19,7 @@ const ACTION_REQUIRED_PHASE: Record<string, string> = {
   approve_prd: 'requirement',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
+  confirm_master_mr_merged: 'deployment',
   approve_test: 'deployment',
   reject_test: 'deployment',
   approve_deploy: 'deployment',
@@ -28,6 +29,7 @@ const APPROVE_PENDING_LABEL: Record<string, string> = {
   approve_prd: '正在确认 PRD…',
   approve_dev: '正在提交开发验收…',
   confirm_mr_merged: '正在确认 MR 合并…',
+  confirm_master_mr_merged: '正在确认上线 MR 合并…',
   approve_test: '正在确认测试通过…',
   reject_test: '正在回退至开发…',
   approve_deploy: '正在确认正式上线完成…',
@@ -76,17 +78,24 @@ interface DevelopmentConfig {
 }
 
 interface DeploymentConfig {
+  executionMode?: 'manual' | 'agent';
   step?:
     | 'awaiting_mr_merge'
     | 'awaiting_pipeline'
     | 'awaiting_test_deploy'
     | 'awaiting_test_approval'
+    | 'awaiting_manual_test_deploy'
+    | 'awaiting_master_mr_merge'
+    | 'awaiting_manual_prod_verify'
     | 'awaiting_prod_deploy'
     | 'awaiting_prod_approval';
   mergeRequest?: { url: string; number: number; headBranch?: string; baseBranch?: string };
+  masterMergeRequest?: { url: string; number: number; headBranch?: string; baseBranch?: string };
   mergeAssigneeUserId?: string;
+  masterMergeAssigneeUserId?: string;
   testApproverUserId?: string;
   targetBranch?: string;
+  productionBranch?: string;
 }
 
 export function ChatRoom({ loopId }: { loopId: string }) {
@@ -284,10 +293,22 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return phase === 'deployment' && deployConfig?.step === 'awaiting_mr_merge';
   }
 
+  function isMasterMrMergePending(): boolean {
+    return phase === 'deployment' && deployConfig?.step === 'awaiting_master_mr_merge';
+  }
+
   function canConfirmMrMerged(): boolean {
     if (!user || !isMrMergePending()) return false;
     if (deployConfig?.mergeAssigneeUserId) {
       return deployConfig.mergeAssigneeUserId === user.userId;
+    }
+    return true;
+  }
+
+  function canConfirmMasterMrMerged(): boolean {
+    if (!user || !isMasterMrMergePending()) return false;
+    if (deployConfig?.masterMergeAssigneeUserId) {
+      return deployConfig.masterMergeAssigneeUserId === user.userId;
     }
     return true;
   }
@@ -310,10 +331,10 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   function shouldOfferRecover(): boolean {
     if (loopStatus === 'blocked') return true;
     const step = deployConfig?.step;
-    if (
-      phase === 'deployment' &&
-      (step === 'awaiting_test_deploy' || step === 'awaiting_prod_deploy')
-    ) {
+    const isAgentDeploy =
+      deployConfig?.executionMode !== 'manual' &&
+      (step === 'awaiting_test_deploy' || step === 'awaiting_prod_deploy');
+    if (phase === 'deployment' && isAgentDeploy) {
       return true;
     }
     if (phase === 'deployment' && !step && !deployConfig?.mergeRequest) {
@@ -330,11 +351,28 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     return true;
   }
 
+  function canConfirmMasterMrMerged(): boolean {
+    if (!user || !isMasterMrMergePending()) return false;
+    if (deployConfig?.masterMergeAssigneeUserId) {
+      return deployConfig.masterMergeAssigneeUserId === user.userId;
+    }
+    return true;
+  }
+
   function isLatestMrMergeMessage(message: Message): boolean {
     const last = [...messages]
       .reverse()
       .find((m) =>
         m.content.actions?.some((a) => a.action === 'confirm_mr_merged'),
+      );
+    return last?.id === message.id;
+  }
+
+  function isLatestMasterMrMergeMessage(message: Message): boolean {
+    const last = [...messages]
+      .reverse()
+      .find((m) =>
+        m.content.actions?.some((a) => a.action === 'confirm_master_mr_merged'),
       );
     return last?.id === message.id;
   }
@@ -362,12 +400,20 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   function isAwaitingTestApproval(): boolean {
     return (
       deployConfig?.step === 'awaiting_test_approval' ||
-      deployConfig?.step === 'awaiting_pipeline'
+      deployConfig?.step === 'awaiting_pipeline' ||
+      deployConfig?.step === 'awaiting_manual_test_deploy'
     );
   }
 
   function isAwaitingProdApproval(): boolean {
-    return deployConfig?.step === 'awaiting_prod_approval';
+    return (
+      deployConfig?.step === 'awaiting_prod_approval' ||
+      deployConfig?.step === 'awaiting_manual_prod_verify'
+    );
+  }
+
+  function isManualDeployMode(): boolean {
+    return deployConfig?.executionMode !== 'agent';
   }
 
   /** 展示审批按钮（含不可用态，避免「文案让点但按钮消失」） */
@@ -390,6 +436,10 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     if (action === 'confirm_mr_merged') {
       if (deployConfig?.step !== 'awaiting_mr_merge') return false;
       return isLatestMrMergeMessage(message);
+    }
+    if (action === 'confirm_master_mr_merged') {
+      if (deployConfig?.step !== 'awaiting_master_mr_merge') return false;
+      return isLatestMasterMrMergeMessage(message);
     }
     if (action === 'approve_test' || action === 'reject_test') {
       if (!isAwaitingTestApproval()) return false;
@@ -419,6 +469,9 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     }
     if (action === 'confirm_mr_merged') {
       return canConfirmMrMerged();
+    }
+    if (action === 'confirm_master_mr_merged') {
+      return canConfirmMasterMrMerged();
     }
     if (action === 'approve_test' || action === 'reject_test') {
       return canApproveTest();
@@ -450,16 +503,26 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       }
       return undefined;
     }
+    if (action === 'confirm_master_mr_merged') {
+      if (!canConfirmMasterMrMerged()) {
+        return '仅被指派的合并负责人可确认上线 MR 已合并';
+      }
+      return undefined;
+    }
     if (action === 'approve_test' || action === 'reject_test') {
       if (!canApproveTest()) {
         return deployConfig?.testApproverUserId
           ? '仅被指派的测试审批人可操作'
-          : '请等待测试环境部署完成';
+          : isManualDeployMode()
+            ? '请先完成测试环境部署与验证'
+            : '请等待测试环境部署完成';
       }
       return undefined;
     }
     if (action === 'approve_deploy' && !isAwaitingProdApproval() && deployConfig?.step !== 'awaiting_pipeline') {
-      return '请先完成测试审批与生产部署';
+      return isManualDeployMode()
+        ? '请先完成测试验证、上线 MR 合并与生产验证'
+        : '请先完成测试审批与生产部署';
     }
     if (!isActionAvailable(action)) {
       const required = ACTION_REQUIRED_PHASE[action];
@@ -737,9 +800,13 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             {phase}
             {devConfig?.mode === 'agent' ? ' · Dev Agent' : ''}
             {devConfig?.mode === 'external' ? ' · 外部工具' : ''}
+            {deployConfig?.executionMode === 'manual' ? ' · 人工部署' : ''}
             {deployConfig?.step === 'awaiting_mr_merge' ? ' · 待合并 MR' : ''}
+            {deployConfig?.step === 'awaiting_manual_test_deploy' ? ' · 待部署测试' : ''}
             {deployConfig?.step === 'awaiting_test_deploy' ? ' · 测试环境部署中' : ''}
             {deployConfig?.step === 'awaiting_test_approval' ? ' · 待测试审批' : ''}
+            {deployConfig?.step === 'awaiting_master_mr_merge' ? ' · 待合并上线 MR' : ''}
+            {deployConfig?.step === 'awaiting_manual_prod_verify' ? ' · 待验证生产' : ''}
             {deployConfig?.step === 'awaiting_prod_deploy' ? ' · 生产部署中' : ''}
             {deployConfig?.step === 'awaiting_prod_approval' ? ' · 待确认上线' : ''}
             {deployConfig?.step === 'awaiting_pipeline' ? ' · 待跑流水线' : ''}
@@ -981,10 +1048,16 @@ export function ChatRoom({ loopId }: { loopId: string }) {
             <div style={{ color: '#8b949e', marginTop: 8, fontSize: 13 }}>
               请在 Git 平台合并 MR 后，点击下方「部署操作」栏中的「MR 已合并」。
             </div>
+          ) : isMasterMrMergePending() ? (
+            <div style={{ color: '#8b949e', marginTop: 8, fontSize: 13 }}>
+              请在 Git 平台合并上线 MR 后，点击下方「部署操作」栏中的「上线 MR 已合并」。
+            </div>
           ) : (
             <div style={{ marginTop: 8 }}>
               <div style={{ color: '#8b949e', fontSize: 13, marginBottom: 8 }}>
-                {blocker.requestedBy === 'ops-agent'
+                {blocker.requestedBy === 'ops-agent' && isManualDeployMode()
+                  ? '本 Loop 为人工部署模式，无需 Ops Agent 部署。点击「已解决」后请使用顶部「部署操作」继续。'
+                  : blocker.requestedBy === 'ops-agent'
                   ? '处理完成后点击「已解决」解除阻塞，再 @ops-agent 继续部署。'
                   : blocker.requestedBy === 'dev-agent'
                     ? '处理完成后点击「已解决」解除阻塞，再 @dev-agent 继续。'
@@ -1020,6 +1093,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       )}
 
       {(isMrMergePending() ||
+        isMasterMrMergePending() ||
         isAwaitingTestApproval() ||
         isAwaitingProdApproval()) && (
         <div
@@ -1063,6 +1137,40 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                   : 'MR 已合并'}
               </button>
             )}
+            {isMasterMrMergePending() && deployConfig?.masterMergeRequest?.url && (
+              <a
+                href={deployConfig.masterMergeRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#58a6ff', fontSize: 13 }}
+              >
+                打开上线 MR #{deployConfig.masterMergeRequest.number}
+              </a>
+            )}
+            {isMasterMrMergePending() && (
+              <button
+                type="button"
+                onClick={() =>
+                  canConfirmMasterMrMerged() && !busy && void handleAction('confirm_master_mr_merged')
+                }
+                disabled={!canConfirmMasterMrMerged() || busy}
+                title={actionDisabledHint('confirm_master_mr_merged')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  border: `1px solid ${canConfirmMasterMrMerged() && !busy ? '#238636' : '#484f58'}`,
+                  background: canConfirmMasterMrMerged() && !busy ? '#238636' : 'transparent',
+                  color: canConfirmMasterMrMerged() && !busy ? '#fff' : '#8b949e',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: canConfirmMasterMrMerged() && !busy ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {clientPending === APPROVE_PENDING_LABEL.confirm_master_mr_merged
+                  ? '处理中…'
+                  : '上线 MR 已合并'}
+              </button>
+            )}
             {isAwaitingTestApproval() && (
               <>
                 <button
@@ -1080,7 +1188,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                     cursor: canApproveTest() && !busy ? 'pointer' : 'not-allowed',
                   }}
                 >
-                  测试通过，进入上线
+                  {isManualDeployMode() ? '测试环境验证通过' : '测试通过，进入上线'}
                 </button>
                 <button
                   type="button"
@@ -1124,10 +1232,17 @@ export function ChatRoom({ loopId }: { loopId: string }) {
                     isActionClickable('approve_deploy') && !busy ? 'pointer' : 'not-allowed',
                 }}
               >
-                确认正式上线完成
+                {deployConfig?.step === 'awaiting_manual_prod_verify'
+                  ? '生产环境验证通过，完成 Loop'
+                  : '确认正式上线完成'}
               </button>
             )}
           </div>
+          {isManualDeployMode() && deployConfig?.step === 'awaiting_manual_test_deploy' && (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#8b949e' }}>
+              请手动触发流水线部署测试环境，验证无误后再点击「测试环境验证通过」。
+            </div>
+          )}
         </div>
       )}
 

@@ -6,3 +6,4 @@ export * from './human-help.js';
 export * from './agent-notify.js';
 export * from './git-remote.js';
 export * from './deploy.js';
+export * from './deployment-config.js';
