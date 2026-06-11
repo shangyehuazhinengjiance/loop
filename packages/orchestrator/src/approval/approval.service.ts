@@ -1,4 +1,4 @@
-import type { ApprovalActionType } from '@loop/shared';
+import { isAwaitingProdApproval, type ApprovalActionType } from '@loop/shared';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
@@ -41,6 +41,23 @@ export class ApprovalService {
 
     const loop = await this.loopRepo.findById(input.loopId);
     if (!loop) throw new BadRequestException('Loop not found');
+
+    if (
+      input.action === 'approve_deploy' &&
+      loop.phase === 'done' &&
+      isAwaitingProdApproval(loop.context.deployment?.step)
+    ) {
+      await this.deploymentService.onProdVerificationComplete(
+        input.loopId,
+        input.approvedBy,
+      );
+      return {
+        duplicate: true,
+        action: input.action,
+        phase: loop.phase,
+        alreadyCompleted: true,
+      };
+    }
 
     const requiredPhase = ACTION_REQUIRED_PHASE[input.action];
     if (loop.phase !== requiredPhase) {

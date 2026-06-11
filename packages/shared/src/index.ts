@@ -8,3 +8,4 @@ export * from './git-remote.js';
 export * from './deploy.js';
 export * from './deployment-config.js';
 export * from './fetch-timeout.js';
+export * from './loop-dot-loop.js';
