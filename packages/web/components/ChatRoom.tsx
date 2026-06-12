@@ -20,6 +20,7 @@ const ORCHESTRATOR =
 
 const ACTION_REQUIRED_PHASE: Record<string, string> = {
   approve_prd: 'requirement',
+  confirm_prd_revision: 'development',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
   confirm_master_mr_merged: 'deployment',
@@ -30,6 +31,7 @@ const ACTION_REQUIRED_PHASE: Record<string, string> = {
 
 const APPROVE_PENDING_LABEL: Record<string, string> = {
   approve_prd: '正在确认 PRD…',
+  confirm_prd_revision: '正在确认 PRD 修订…',
   approve_dev: '正在提交开发验收…',
   confirm_mr_merged: '正在确认 MR 合并…',
   confirm_master_mr_merged: '正在确认上线 MR 合并…',
@@ -480,7 +482,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       return isLatestTestApprovalMessage(message);
     }
     if (!isActionAvailable(action)) return false;
-    if (action === 'approve_prd') {
+    if (action === 'approve_prd' || action === 'confirm_prd_revision') {
       return message.content.type === 'artifact';
     }
     if (action === 'approve_deploy') {

@@ -21,12 +21,20 @@ export async function finishPmPrd(
   });
   const { prd, tasks } = parsePrdAndTasks(text);
   await api.updateContext(loopId, { ...loop.context, prd, tasks });
+
+  const isRevision = phase === 'development';
   await api.postAgentMessage(
     loopId,
     {
       type: 'artifact',
       body: text,
-      actions: [{ id: 'approve-prd', label: '确认需求', action: 'approve_prd' }],
+      actions: [
+        {
+          id: 'approve-prd',
+          label: isRevision ? '确认需求修订' : '确认需求',
+          action: isRevision ? 'confirm_prd_revision' : 'approve_prd',
+        },
+      ],
     },
     phase,
   );

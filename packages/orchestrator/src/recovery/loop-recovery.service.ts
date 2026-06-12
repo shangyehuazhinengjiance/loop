@@ -86,6 +86,17 @@ export class LoopRecoveryService {
         await this.deploymentService.submitToTestBranch(loopId, userId);
         actions.push('已重新尝试创建 MR 并进入部署流程');
       }
+    } else if (
+      fresh.phase === 'development' &&
+      fresh.context.agentRouting?.suspendedAgent
+    ) {
+      this.agentCoordinator.markSuspended(
+        loopId,
+        fresh.context.agentRouting.suspendedAgent,
+      );
+      hints.push(
+        'Dev Agent 处于挂起状态（等待 PRD 修订确认）。请完成 PM 讨论并点击「确认需求修订」，或 @dev-agent 手动恢复。',
+      );
     } else if (fresh.phase === 'development' && fresh.context.development?.mode === 'agent') {
       await this.agentCoordinator.activate(loopId, 'dev', {
         reason: 'manual',

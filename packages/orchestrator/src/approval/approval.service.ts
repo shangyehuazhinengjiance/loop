@@ -1,5 +1,10 @@
-import { isAwaitingProdApproval, type ApprovalActionType } from '@loop/shared';
+import {
+  isAwaitingProdApproval,
+  type AgentRole,
+  type ApprovalActionType,
+} from '@loop/shared';
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { DevelopmentService } from '../development/development.service.js';
@@ -11,6 +16,7 @@ const ACTION_REQUIRED_PHASE: Record<
   string
 > = {
   approve_prd: 'requirement',
+  confirm_prd_revision: 'development',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
   confirm_master_mr_merged: 'deployment',
@@ -27,6 +33,7 @@ export class ApprovalService {
     private readonly phaseService: PhaseService,
     private readonly developmentService: DevelopmentService,
     private readonly deploymentService: DeploymentService,
+    private readonly agentCoordinator: AgentCoordinator,
   ) {}
 
   async approve(input: {
@@ -103,6 +110,23 @@ export class ApprovalService {
     }
     if (exists && input.action !== 'approve_test') {
       return { duplicate: true, action: input.action, phase: loop.phase };
+    }
+
+    if (input.action === 'confirm_prd_revision') {
+      await this.approvalRepo.create({
+        loopId: input.loopId,
+        action: input.action,
+        approvedBy: input.approvedBy,
+        phase: loop.phase,
+        note: input.note,
+      });
+      await this.phaseService.confirmPrdRevision(
+        input.loopId,
+        input.approvedBy,
+        input.note,
+      );
+      await this.resumeDevAfterPrdRevision(input.loopId, input.approvedBy);
+      return { duplicate: false, action: input.action, phase: loop.phase };
     }
 
     if (input.action === 'confirm_mr_merged') {
@@ -239,6 +263,42 @@ export class ApprovalService {
     }
 
     return { duplicate: false, event };
+  }
+
+  /** PRD 修订确认后恢复此前挂起的 Dev Agent */
+  private async resumeDevAfterPrdRevision(
+    loopId: string,
+    userId: string,
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop || loop.phase !== 'development') return;
+
+    const suspended: AgentRole | undefined =
+      this.agentCoordinator.getSuspendedAgent(loopId) ??
+      loop.context.agentRouting?.suspendedAgent;
+
+    if (loop.context.agentRouting) {
+      await this.loopRepo.updateContext(loopId, {
+        ...loop.context,
+        agentRouting: undefined,
+      });
+    }
+
+    if (this.agentCoordinator.getActiveAgent(loopId) === 'pm') {
+      await this.agentCoordinator.cancel(loopId, 'pm');
+    }
+
+    if (suspended === 'dev') {
+      await this.agentCoordinator.resume(loopId, 'dev', { userId });
+      return;
+    }
+
+    if (loop.context.development?.mode === 'agent') {
+      await this.agentCoordinator.activate(loopId, 'dev', {
+        reason: 'resume',
+        userId,
+      });
+    }
   }
 
   async list(loopId: string) {
