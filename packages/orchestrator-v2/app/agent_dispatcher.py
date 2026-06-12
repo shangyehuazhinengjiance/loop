@@ -73,7 +73,7 @@ class AgentDispatcher:
             "runId": run_id,
             "templateId": template_id,
             "agentId": agent_id,
-            "orchestratorUrl": f"http://127.0.0.1:{self.settings.orchestrator_port}",
+            "orchestratorUrl": self.settings.orchestrator_url.rstrip("/"),
             "startedBy": started_by,
         }
         try:

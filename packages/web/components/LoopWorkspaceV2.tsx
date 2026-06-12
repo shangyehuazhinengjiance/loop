@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChatInput } from './ChatInput';
+import { ChatMessageBubble, type ChatMessageModel } from './ChatMessageBubble';
 import { LoopSidebar } from './LoopSidebar';
 import { WorkStreamBoard } from './WorkStreamBoard';
 
@@ -15,8 +17,19 @@ interface Message {
     type: string;
     body: string;
     actions?: { id: string; label: string; action: string; runId?: string }[];
+    mentions?: string[];
   };
   createdAt: string;
+}
+
+function toChatModel(m: Message, index: number): ChatMessageModel {
+  return {
+    id: m.id || `local-${index}`,
+    sender: m.sender,
+    content: m.content,
+    phase: 'requirement',
+    metadata: { timestamp: m.createdAt },
+  };
 }
 
 export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
@@ -25,6 +38,7 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
   const [connected, setConnected] = useState(false);
   const [loopTitle, setLoopTitle] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [sendError, setSendError] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const userId = 'user-local';
   const displayName = '本地用户';
@@ -53,14 +67,18 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
     const ws = new WebSocket(`${WS_URL}/ws/loops/${loopId}`);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      setConnected(true);
+      setSendError('');
+    };
     ws.onclose = () => setConnected(false);
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data as string) as
           | { type: 'history'; messages: Message[] }
           | { type: 'message'; message: Message }
-          | { type: 'processing'; active?: boolean };
+          | { type: 'processing'; active?: boolean }
+          | { type: 'error'; message: string };
         if (data.type === 'history') {
           setMessages(data.messages);
         }
@@ -69,6 +87,9 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
         }
         if (data.type === 'processing') {
           setProcessing(Boolean(data.active));
+        }
+        if (data.type === 'error') {
+          setSendError(data.message);
         }
       } catch {
         // ignore
@@ -80,7 +101,11 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
 
   const send = () => {
     const text = body.trim();
-    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      if (!connected) setSendError('未连接群聊网关，请检查 WebSocket 配置');
+      return;
+    }
+    setSendError('');
     wsRef.current.send(
       JSON.stringify({ type: 'message', body: text, userId, displayName }),
     );
@@ -94,6 +119,8 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
       body: JSON.stringify({ action, runId, userId, displayName }),
     });
   };
+
+  const chatModels = messages.map(toChatModel);
 
   return (
     <div className="v2-layout">
@@ -110,37 +137,48 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
           {processing && <p className="v2-processing">Agent 处理中…</p>}
           <section className="v2-chat">
             <h2>群聊</h2>
-            <div className="v2-messages">
-              {messages.map((m) => (
-                <div key={m.id} className={`v2-msg v2-msg-${m.sender.type}`}>
-                  <strong>{m.sender.displayName}</strong>
-                  <div>
-                    <span>{m.content.body}</span>
-                    {m.content.actions?.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        className="v2-action-btn"
-                        onClick={() => postAction(a.action, a.runId)}
-                      >
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            <div className="v2-messages chat-msg-list">
+              {chatModels.map((m, i) => (
+                <ChatMessageBubble
+                  key={m.id}
+                  message={m}
+                  prevMessage={i > 0 ? chatModels[i - 1] : undefined}
+                  currentUserId={userId}
+                  mentionsYou={false}
+                  mentionUnread={false}
+                  renderActions={
+                    m.content.actions?.length
+                      ? () => (
+                          <>
+                            {m.content.actions!.map((a) => (
+                              <button
+                                key={a.id}
+                                type="button"
+                                className="v2-action-btn"
+                                onClick={() => postAction(a.action, a.runId)}
+                              >
+                                {a.label}
+                              </button>
+                            ))}
+                          </>
+                        )
+                      : undefined
+                  }
+                />
               ))}
             </div>
             <div className="v2-input">
-              <input
+              <ChatInput
                 value={body}
-                onChange={(e) => setBody(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && send()}
-                placeholder="@pm-agent 开始撰写 PRD…"
+                onChange={setBody}
+                onSend={send}
+                disabled={!connected}
               />
-              <button type="button" onClick={send}>
+              <button type="button" className="v2-send-btn" onClick={send} disabled={!connected}>
                 发送
               </button>
             </div>
+            {sendError && <p className="ws-error">{sendError}</p>}
           </section>
         </div>
         <LoopSidebar loopId={loopId} />

@@ -564,9 +564,27 @@ button {
 }
 
 .v2-messages {
-  max-height: 320px;
+  min-height: 280px;
+  max-height: min(52vh, 560px);
   overflow-y: auto;
   margin-bottom: 12px;
+  border-radius: 8px;
+  border: 1px solid #21262d;
+}
+
+.v2-send-btn {
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: none;
+  background: #238636;
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.v2-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .v2-msg {

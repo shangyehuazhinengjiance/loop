@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     database_url: str = "mysql://loop:loop@127.0.0.1:3306/loop_v2"
     orchestrator_port: int = 3000
+    # 集群内需为 Service 地址，供 agent-worker 回调 API
+    orchestrator_url: str = "http://127.0.0.1:3000"
     agent_worker_url: str = "http://127.0.0.1:3010"
     workspace_root: str = "./workspaces"
     templates_yaml: str = str(REPO_ROOT / "config" / "workstream-templates.yaml")
