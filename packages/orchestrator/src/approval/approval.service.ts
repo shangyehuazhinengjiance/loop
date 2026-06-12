@@ -273,11 +273,12 @@ export class ApprovalService {
     const loop = await this.loopRepo.findById(loopId);
     if (!loop || loop.phase !== 'development') return;
 
+    const routing = loop.context.agentRouting;
+    const wasExternalPause = routing?.suspendedDevelopmentMode === 'external';
     const suspended: AgentRole | undefined =
-      this.agentCoordinator.getSuspendedAgent(loopId) ??
-      loop.context.agentRouting?.suspendedAgent;
+      this.agentCoordinator.getSuspendedAgent(loopId) ?? routing?.suspendedAgent;
 
-    if (loop.context.agentRouting) {
+    if (routing) {
       await this.loopRepo.updateContext(loopId, {
         ...loop.context,
         agentRouting: undefined,
@@ -286,6 +287,11 @@ export class ApprovalService {
 
     if (this.agentCoordinator.getActiveAgent(loopId) === 'pm') {
       await this.agentCoordinator.cancel(loopId, 'pm');
+    }
+
+    if (wasExternalPause) {
+      await this.developmentService.resumeExternalDevAfterPrdRevision(loopId);
+      return;
     }
 
     if (suspended === 'dev') {

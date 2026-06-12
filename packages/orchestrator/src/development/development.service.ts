@@ -255,6 +255,39 @@ export class DevelopmentService {
     }
   }
 
+  /** PRD 修订确认后，恢复此前暂停的外部工具开发阻塞 */
+  async resumeExternalDevAfterPrdRevision(loopId: string): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop || loop.phase !== 'development') return;
+
+    const dev = loop.context.development;
+    const external = dev?.external;
+    if (dev?.mode !== 'external' || !external) return;
+
+    const branch = external.targetBranch;
+    const blocker = {
+      kind: 'external' as const,
+      phase: 'development' as const,
+      reason: `等待 @${external.assigneeDisplayName} 在外部工具完成开发（分支 \`${branch}\`）`,
+      assigneeUserId: external.assigneeUserId,
+      assigneeDisplayName: external.assigneeDisplayName,
+      requestedBy: 'orchestrator' as const,
+      createdAt: new Date().toISOString(),
+    };
+    await this.loopRepo.updateBlocker(loopId, blocker, 'blocked');
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: 'development',
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: `PRD 修订已确认，已恢复外部工具开发交接。请 @${external.assigneeUserId}（${external.assigneeDisplayName}）继续 push 到 \`${branch}\` 后点击「开发完成，进入部署」。`,
+        mentions: [`@${external.assigneeUserId}`],
+      },
+    });
+  }
+
   async completeExternal(input: {
     loopId: string;
     userId: string;

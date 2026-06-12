@@ -92,7 +92,11 @@ export class AgentRunnerService implements OnModuleInit {
 
     try {
       const loop = await this.loopRepo.findById(event.loopId);
-      if (loop?.status === 'blocked' && event.reason !== 'manual') {
+      const allowedWhileBlocked =
+        event.reason === 'manual' ||
+        event.reason === 'mention' ||
+        event.reason === 'resume';
+      if (loop?.status === 'blocked' && !allowedWhileBlocked) {
         console.info(`[agent-runner] skip ${key}: loop is blocked`);
         return;
       }

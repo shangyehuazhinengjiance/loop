@@ -256,7 +256,7 @@ export class LoopService {
     return message;
   }
 
-  /** 跨阶段 @mention 路由：development 中 @pm 时挂起 Dev 再激活 PM */
+  /** 跨阶段 @mention 路由：development 中 @pm 时挂起开发再激活 PM */
   private async routeAgentMention(input: {
     loopId: string;
     phase: Phase;
@@ -264,12 +264,21 @@ export class LoopService {
     userId: string;
   }): Promise<void> {
     const { loopId, phase, agent, userId } = input;
+    const loop = await this.loopRepo.findById(loopId);
 
-    if (phase === 'development' && agent === 'pm') {
+    if (phase === 'development' && agent === 'pm' && loop) {
       const devStatus = this.agentCoordinator.getStatus(loopId, 'dev');
+      const externalDev =
+        loop.context.development?.mode === 'external' &&
+        loop.context.development.external;
+
       if (devStatus === 'active') {
         await this.agentCoordinator.suspend(loopId, 'dev', 'mention_handoff');
-        await this.persistAgentRouting(loopId, 'dev', userId);
+        await this.persistAgentRouting(loopId, {
+          suspendedAgent: 'dev',
+          suspendedDevelopmentMode: 'agent',
+          suspendedBy: userId,
+        });
         await this.chatService.publishAgentMessage({
           loopId,
           phase,
@@ -279,6 +288,8 @@ export class LoopService {
             body: 'Dev Agent 已挂起，PM Agent 介入处理需求变更…',
           },
         });
+      } else if (externalDev && loop.status === 'blocked') {
+        await this.pauseExternalDevForPm(loopId, loop, userId);
       }
     }
 
@@ -288,10 +299,36 @@ export class LoopService {
     });
   }
 
+  /** 外部工具开发中 @pm：解除阻塞并暂停外部开发交接 */
+  private async pauseExternalDevForPm(
+    loopId: string,
+    loop: LoopRow,
+    userId: string,
+  ): Promise<void> {
+    await this.loopRepo.updateBlocker(loopId, null, 'active');
+    await this.persistAgentRouting(loopId, {
+      suspendedAgent: 'dev',
+      suspendedDevelopmentMode: 'external',
+      suspendedBy: userId,
+    });
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: loop.phase,
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: '外部工具开发已暂停，PM Agent 介入处理需求变更。修订确认后将恢复外部开发交接。',
+      },
+    });
+  }
+
   private async persistAgentRouting(
     loopId: string,
-    suspendedAgent: AgentRole,
-    userId: string,
+    routing: {
+      suspendedAgent: AgentRole;
+      suspendedDevelopmentMode?: 'agent' | 'external';
+      suspendedBy: string;
+    },
   ): Promise<void> {
     const loop = await this.loopRepo.findById(loopId);
     if (!loop) return;
@@ -299,9 +336,10 @@ export class LoopService {
     await this.loopRepo.updateContext(loopId, {
       ...loop.context,
       agentRouting: {
-        suspendedAgent,
+        suspendedAgent: routing.suspendedAgent,
+        suspendedDevelopmentMode: routing.suspendedDevelopmentMode,
         suspendedAt: new Date().toISOString(),
-        suspendedBy: userId,
+        suspendedBy: routing.suspendedBy,
       },
     });
   }
