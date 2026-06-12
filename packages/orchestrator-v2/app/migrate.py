@@ -5,9 +5,12 @@ import sys
 from pathlib import Path
 
 import aiomysql
+from pymysql.err import OperationalError
 
 from app.config import get_settings
 from app.db import _parse_mysql_url, split_sql_statements
+
+MIGRATE_LOCK_NAME = "loop_v2_schema_migrate"
 
 
 async def ensure_database() -> None:
@@ -24,6 +27,34 @@ async def ensure_database() -> None:
         await conn.commit()
     finally:
         conn.close()
+
+
+async def _has_table(cur: aiomysql.Cursor, table: str) -> bool:
+    await cur.execute("SHOW TABLES LIKE %s", (table,))
+    return await cur.fetchone() is not None
+
+
+async def _baseline_existing_schema(
+    cur: aiomysql.Cursor,
+    files: list[Path],
+    applied: set[str],
+) -> set[str]:
+    """DB 已有 v2 表但 schema_migrations 无记录时（Job 与启动并发等），补登记。"""
+    if applied:
+        return applied
+    if not await _has_table(cur, "projects"):
+        return applied
+
+    for file in files:
+        if file.name in applied:
+            continue
+        await cur.execute(
+            "INSERT INTO schema_migrations (version) VALUES (%s)",
+            (file.name,),
+        )
+        applied.add(file.name)
+        print(f"baseline {file.name} (schema already present)")
+    return applied
 
 
 async def migrate() -> None:
@@ -44,24 +75,45 @@ async def migrate() -> None:
             )
             await conn.commit()
 
-            await cur.execute("SELECT version FROM schema_migrations ORDER BY version")
-            applied = {row[0] for row in await cur.fetchall()}
+            await cur.execute("SELECT GET_LOCK(%s, 120)", (MIGRATE_LOCK_NAME,))
+            lock_row = await cur.fetchone()
+            if not lock_row or lock_row[0] != 1:
+                raise RuntimeError("Could not acquire schema migration lock")
 
-            migrations_dir = Path(settings.migrations_dir)
-            files = sorted(migrations_dir.glob("*.sql"))
-            for file in files:
-                if file.name in applied:
-                    print(f"skip {file.name}")
-                    continue
-                sql = file.read_text(encoding="utf-8")
-                for statement in split_sql_statements(sql):
-                    await cur.execute(statement)
-                await cur.execute(
-                    "INSERT INTO schema_migrations (version) VALUES (%s)",
-                    (file.name,),
-                )
+            try:
+                await cur.execute("SELECT version FROM schema_migrations ORDER BY version")
+                applied = {row[0] for row in await cur.fetchall()}
+
+                migrations_dir = Path(settings.migrations_dir)
+                files = sorted(migrations_dir.glob("*.sql"))
+
+                applied = await _baseline_existing_schema(cur, files, applied)
+                if applied:
+                    await conn.commit()
+
+                for file in files:
+                    if file.name in applied:
+                        print(f"skip {file.name}")
+                        continue
+                    sql = file.read_text(encoding="utf-8")
+                    for statement in split_sql_statements(sql):
+                        try:
+                            await cur.execute(statement)
+                        except OperationalError as exc:
+                            # 1050 = table exists — 并发或历史半迁移时跳过单条 DDL
+                            if exc.args and exc.args[0] == 1050:
+                                print(f"warn: skip existing object in {file.name}: {exc}")
+                                continue
+                            raise
+                    await cur.execute(
+                        "INSERT INTO schema_migrations (version) VALUES (%s)",
+                        (file.name,),
+                    )
+                    await conn.commit()
+                    print(f"applied {file.name}")
+            finally:
+                await cur.execute("SELECT RELEASE_LOCK(%s)", (MIGRATE_LOCK_NAME,))
                 await conn.commit()
-                print(f"applied {file.name}")
     finally:
         conn.close()
     print("migrations complete")
