@@ -875,22 +875,3 @@ button {
   padding: 2px 0;
 }
 
-/* v1 废弃提示 */
-.v1-deprecation-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 16px;
-  background: #3d2e00;
-  border-bottom: 1px solid #6e5500;
-  color: #f0c14b;
-  font-size: 13px;
-}
-
-.v1-deprecation-banner a {
-  color: #79c0ff;
-  font-weight: 600;
-  white-space: nowrap;
-}

@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -45,9 +44,6 @@ export default function HomeV2() {
     <main className="v2-home">
       <h1>AI Native Loop v2</h1>
       <p>子任务流驱动的协作 Loop。详细设计见仓库 <code>.loop/DESIGN.md</code>。</p>
-      <p>
-        <Link href="/">← v1 首页</Link>
-      </p>
 
       <div className="v2-form">
         <label>
