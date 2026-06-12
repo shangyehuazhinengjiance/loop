@@ -57,6 +57,91 @@ class GitService:
         git_ref = self._current_ref(ws)
         return {"workspacePath": str(ws), "gitBranch": loop_branch, "gitRef": git_ref}
 
+    async def commit_workspace(
+        self,
+        workspace_path: str,
+        loop_id: str,
+        commit_message: str,
+        project_git: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._commit_workspace_sync,
+            workspace_path,
+            loop_id,
+            commit_message,
+            project_git or {},
+        )
+
+    def _commit_workspace_sync(
+        self,
+        workspace_path: str,
+        loop_id: str,
+        commit_message: str,
+        project_git: dict[str, Any],
+    ) -> dict[str, Any]:
+        ws = Path(workspace_path)
+        if not (ws / ".git").exists():
+            raise RuntimeError("工作区无 Git 仓库")
+
+        credential_ref = project_git.get("credentialRef") or "GIT_ACCESS_TOKEN"
+        env = self._git_env(credential_ref)
+        self._run(["git", "config", "user.email", "loop@ai-native.dev"], cwd=ws)
+        self._run(["git", "config", "user.name", "AI Native Loop"], cwd=ws)
+
+        status = self._run(["git", "status", "--porcelain"], cwd=ws).stdout.strip()
+        had_changes = bool(status)
+        if had_changes:
+            self._run(["git", "add", "-A"], cwd=ws)
+            self._run(["git", "commit", "-m", commit_message], cwd=ws, env=env)
+
+        commit_sha = self._current_ref(ws)
+        if not commit_sha:
+            raise RuntimeError("无法获取当前 commit")
+        branch = self._run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ws
+        ).stdout.strip()
+        return {
+            "commitSha": commit_sha,
+            "hadChanges": had_changes,
+            "branch": branch,
+        }
+
+    async def push_loop_branch(
+        self,
+        workspace_path: str,
+        loop_branch: str,
+        project_git: dict[str, Any] | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._push_loop_branch_sync,
+            workspace_path,
+            loop_branch,
+            project_git or {},
+        )
+
+    def _push_loop_branch_sync(
+        self,
+        workspace_path: str,
+        loop_branch: str,
+        project_git: dict[str, Any],
+    ) -> bool:
+        if not project_git.get("remoteUrl"):
+            return False
+        ws = Path(workspace_path)
+        credential_ref = project_git.get("credentialRef") or "GIT_ACCESS_TOKEN"
+        env = self._git_env(credential_ref)
+        try:
+            self._run(["git", "push", "-u", "origin", loop_branch], cwd=ws, env=env)
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "rejected" in msg.lower() or "non-fast-forward" in msg.lower():
+                raise RuntimeError(
+                    f"推送到 `{loop_branch}` 被拒绝：远程已有本地没有的提交。"
+                    "请在 Git 平台处理后再试。"
+                ) from exc
+            raise
+        return True
+
     async def write_input_requirements(
         self, workspace_path: str, loop_id: str, title: str, content: str
     ) -> str:

@@ -33,6 +33,7 @@ export class OrchestratorApi {
       label: string;
       detail?: string;
       updateBanner?: boolean;
+      active?: boolean;
     },
   ): Promise<void> {
     const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/progress`, {
@@ -123,6 +124,28 @@ export class OrchestratorApi {
     });
     if (!res.ok) throw new Error(`updateContext: ${res.status}`);
     return res.json();
+  }
+
+  async publishPrdToGit(loopId: string): Promise<{
+    commitSha: string;
+    hadChanges: boolean;
+    pushed?: boolean;
+    branch?: string;
+  }> {
+    const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/workspace/publish-prd`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`publishPrdToGit: ${res.status} ${text.slice(0, 300)}`);
+    }
+    return res.json() as Promise<{
+      commitSha: string;
+      hadChanges: boolean;
+      pushed?: boolean;
+      branch?: string;
+    }>;
   }
 }
 

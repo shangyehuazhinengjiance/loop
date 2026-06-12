@@ -1,6 +1,7 @@
 import type { ResolvedModelConfig } from '@loop/shared';
 import { buildDevPrompt } from './prompts.js';
 import type { OrchestratorApi } from './orchestrator-api.js';
+import { finishDevAgent } from './finish-dev.js';
 import {
   DEV_TOOL_DEFINITIONS,
   REQUEST_HUMAN_HELP_TOOL,
@@ -209,25 +210,12 @@ export async function runDevAgentOpenAI(input: {
     }
   }
 
-  const loop = await input.api.getLoop(input.loopId);
-  const inDevPhase = loop.phase === 'development';
-  const canApprove = !humanBlocked && toolsExecuted > 0 && inDevPhase;
-  const body =
-    finalText ||
-    (toolsExecuted > 0 ? '开发完成' : '开发未完成：模型未实际调用工具。请重试 @dev-agent。');
-
-  await input.api.postAgentMessage(
-    input.loopId,
-    {
-      type: canApprove ? 'artifact' : 'text',
-      body: inDevPhase
-        ? body
-        : `${body}\n\n（当前 Loop 处于 \`${loop.phase}\` 阶段，无需开发验收；若需重新验收请先回退到 development。）`,
-      actions: canApprove
-        ? [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' }]
-        : undefined,
-    },
-    loop.phase,
-    humanBlocked ? 'blocked' : canApprove ? 'result' : 'incomplete',
-  );
+  await finishDevAgent({
+    api: input.api,
+    loopId: input.loopId,
+    phase: input.phase,
+    finalText,
+    humanBlocked,
+    toolsExecuted,
+  });
 }

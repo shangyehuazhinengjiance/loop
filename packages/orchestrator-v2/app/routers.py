@@ -368,16 +368,28 @@ async def agent_spawn_from_run(loop_id: str, run_id: str, body: SpawnWorkStreamR
 @router.post("/loops/{loop_id}/progress")
 async def agent_progress(loop_id: str, body: dict):
     async with transaction() as (_, cur):
-        label = body.get("label", "处理中…")
-        await service.publish_system_message(
-            cur,
-            loop_id,
-            label,
-            msg_type="progress",
-            extra={"agentId": body.get("agentId"), "detail": body.get("detail")},
-            run_id=body.get("runId"),
-        )
+        await service.agent_progress_report(cur, loop_id, body)
     return {"ok": True}
+
+
+@router.post("/loops/{loop_id}/workspace/publish-prd")
+async def publish_prd_to_git(loop_id: str):
+    try:
+        async with transaction() as (_, cur):
+            return await service.publish_prd_to_git(cur, loop_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/loops/{loop_id}/workspace/commit-dev")
+async def commit_dev_workspace(loop_id: str, body: dict | None = None):
+    try:
+        async with transaction() as (_, cur):
+            return await service.commit_dev_workspace(
+                cur, loop_id, (body or {}).get("message")
+            )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 # --- Phase 3: 统计 / 回放 / Artifact / 审计 ---

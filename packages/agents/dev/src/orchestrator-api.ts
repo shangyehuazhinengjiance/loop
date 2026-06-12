@@ -6,6 +6,8 @@ export interface LoopRecord {
   title: string;
   context: LoopContext;
   workspace_path?: string;
+  activeTemplateId?: string;
+  activeRunId?: string;
 }
 
 export class OrchestratorApi {
@@ -18,6 +20,54 @@ export class OrchestratorApi {
     const res = await fetch(`${this.baseUrl}/api/loops/${loopId}`);
     if (!res.ok) throw new Error(`getLoop: ${res.status}`);
     return res.json() as Promise<LoopRecord>;
+  }
+
+  async reportProgress(
+    loopId: string,
+    phase: string,
+    input: {
+      label: string;
+      detail?: string;
+      updateBanner?: boolean;
+      active?: boolean;
+    },
+  ): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'dev-agent',
+        phase,
+        ...input,
+        runId: this.runId,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`reportProgress failed: ${res.status}`);
+    }
+  }
+
+  async commitDevWorkspace(loopId: string): Promise<{
+    commitSha: string;
+    hadChanges: boolean;
+    pushed?: boolean;
+    branch?: string;
+  }> {
+    const res = await fetch(`${this.baseUrl}/api/loops/${loopId}/workspace/commit-dev`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`commitDevWorkspace: ${res.status} ${text.slice(0, 300)}`);
+    }
+    return res.json() as Promise<{
+      commitSha: string;
+      hadChanges: boolean;
+      pushed?: boolean;
+      branch?: string;
+    }>;
   }
 
   async postAgentMessage(

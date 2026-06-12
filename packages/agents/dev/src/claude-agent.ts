@@ -2,6 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ResolvedModelConfig } from '@loop/shared';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { finishDevAgent } from './finish-dev.js';
 import { buildDevPrompt } from './prompts.js';
 import { createDevHooks, DEV_SUBAGENTS } from './hooks.js';
 import type { OrchestratorApi } from './orchestrator-api.js';
@@ -126,30 +127,28 @@ export async function runDevAgentClaude(input: {
     throw await enrichClaudeError(err, input.workspacePath, debugFile);
   }
 
+  let toolsExecuted = 0;
+  let finalText = '';
+  let humanBlocked = false;
+
   try {
     for await (const message of stream) {
       if (input.signal?.aborted) break;
 
       const mapped = mapSdkMessageToChat(message as { type: string; [key: string]: unknown });
       if (mapped) {
-        let actions: { id: string; label: string; action: 'approve_dev' }[] | undefined;
-        let body = mapped.body;
-        let msgPhase = input.phase;
-
+        if (mapped.sdkMessageType.startsWith('tool_use:')) {
+          toolsExecuted += 1;
+        }
         if (mapped.sdkMessageType === 'result') {
-          const loop = await input.api.getLoop(input.loopId);
-          msgPhase = loop.phase;
-          if (loop.phase === 'development') {
-            actions = [{ id: 'approve-dev', label: '验收通过', action: 'approve_dev' }];
-          } else {
-            body = `${body}\n\n（当前处于 \`${loop.phase}\` 阶段，无需开发验收。）`;
-          }
+          finalText = mapped.body;
+          continue;
         }
 
         await input.api.postAgentMessage(
           input.loopId,
-          { type: mapped.type, body, actions },
-          msgPhase,
+          { type: mapped.type, body: mapped.body },
+          input.phase,
           mapped.sdkMessageType,
         );
       }
@@ -159,6 +158,17 @@ export async function runDevAgentClaude(input: {
     }
   } catch (err) {
     throw await enrichClaudeError(err, input.workspacePath, debugFile);
+  }
+
+  if (!input.signal?.aborted) {
+    await finishDevAgent({
+      api: input.api,
+      loopId: input.loopId,
+      phase: input.phase,
+      finalText: finalText || '开发完成',
+      humanBlocked,
+      toolsExecuted,
+    });
   }
 
   return sessionId;

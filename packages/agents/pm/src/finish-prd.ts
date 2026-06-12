@@ -21,13 +21,40 @@ export async function finishPmPrd(
   });
   const { prd, tasks } = parsePrdAndTasks(text);
   await api.updateContext(loopId, { ...loop.context, prd, tasks });
+
+  let gitNote = '';
+  await api.reportProgress(loopId, phase, {
+    label: '正在提交 PRD 到仓库…',
+    updateBanner: false,
+  });
+  try {
+    const published = await api.publishPrdToGit(loopId);
+    if (published.hadChanges) {
+      const short = published.commitSha.slice(0, 7);
+      const pushNote = published.pushed ? '，已推送到远程' : '';
+      gitNote = `\n\n---\n✅ PRD 已提交到仓库（\`${short}\`${pushNote}，分支 \`${published.branch ?? 'loop'}\`）`;
+    } else {
+      gitNote = '\n\n---\n（PRD 文件无变更，未产生新 commit）';
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    gitNote = `\n\n---\n⚠️ PRD 未能自动提交：${msg}`;
+    console.warn(`publishPrdToGit failed: ${msg}`);
+  }
+
   await api.postAgentMessage(
     loopId,
     {
       type: 'artifact',
-      body: text,
+      body: `${text}${gitNote}`,
       actions: [{ id: 'approve-prd', label: '确认需求', action: 'approve_prd' }],
     },
     phase,
   );
+
+  await api.reportProgress(loopId, phase, {
+    label: 'PRD 已生成，请确认需求',
+    active: false,
+    updateBanner: false,
+  });
 }

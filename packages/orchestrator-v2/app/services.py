@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from app.analytics import ArtifactService, AuditService, ReplayService, StatsService
@@ -825,6 +826,115 @@ class LoopService:
         msg = self._message_row(row, {})
         await event_bus.publish(loop_id, {"type": "message", "message": msg.model_dump(mode="json")})
         return msg
+
+    def _format_tasks_md(self, tasks: list[dict[str, Any]]) -> str:
+        if not tasks:
+            return "（暂无任务拆解）\n"
+        lines: list[str] = []
+        for i, task in enumerate(tasks):
+            title = task.get("title") or ""
+            status = task.get("status") or "pending"
+            line = f"{i + 1}. **{title}** ({status})"
+            assignee = task.get("assigneeDisplayName") or task.get("assigneeUserId")
+            if assignee:
+                line += f" — @{assignee}"
+            desc = (task.get("description") or "").strip()
+            if desc:
+                line += f"\n   {desc}"
+            lines.append(line)
+        return "\n\n".join(lines) + "\n"
+
+    async def _loop_git_context(
+        self, cur: Any, loop_id: str
+    ) -> tuple[dict, dict, dict[str, Any], str, str]:
+        loop = await self.loops.get_by_id(cur, loop_id)
+        if not loop:
+            raise ValueError("Loop not found")
+        workspace_path = loop.get("workspace_path") or ""
+        if not workspace_path:
+            raise ValueError("工作区未初始化，无法提交 Git")
+        project = await self.projects.get_by_id(cur, loop["project_id"])
+        git_config = (parse_json(project.get("git_config")) if project else None) or {}
+        git_branch = loop.get("git_branch") or f"loop/{loop_id}"
+        context = parse_json(loop.get("context")) or {}
+        return loop, git_config, context, workspace_path, git_branch
+
+    async def publish_prd_to_git(self, cur: Any, loop_id: str) -> dict[str, Any]:
+        loop, git_config, context, workspace_path, git_branch = await self._loop_git_context(
+            cur, loop_id
+        )
+        docs_dir = Path(workspace_path) / "docs" / "loop" / loop_id
+        docs_dir.mkdir(parents=True, exist_ok=True)
+
+        prd = context.get("prd") or {}
+        prd_content = (prd.get("content") or "").strip()
+        prd_title = prd.get("title") or "PRD"
+        prd_body = (
+            f"# {prd_title}\n\n{prd_content}\n"
+            if prd_content
+            else "# PRD\n\n（PRD 内容为空，请回到 Loop 需求阶段补充。）\n"
+        )
+        (docs_dir / "PRD.md").write_text(prd_body, encoding="utf-8")
+        (docs_dir / "tasks.md").write_text(
+            f"# 任务拆解\n\n{self._format_tasks_md(context.get('tasks') or [])}",
+            encoding="utf-8",
+        )
+
+        commit_message = f"loop({loop_id}): publish PRD"
+        result = await self.git.commit_workspace(
+            workspace_path, loop_id, commit_message, git_config
+        )
+        pushed = False
+        if result.get("hadChanges") and git_config.get("remoteUrl"):
+            pushed = await self.git.push_loop_branch(workspace_path, git_branch, git_config)
+
+        if result.get("hadChanges"):
+            context = {**context, "gitRef": result["commitSha"]}
+            await self.loops.update_context(cur, loop_id, context)
+
+        return {**result, "pushed": pushed, "branch": git_branch}
+
+    async def commit_dev_workspace(
+        self, cur: Any, loop_id: str, commit_message: str | None = None
+    ) -> dict[str, Any]:
+        loop, git_config, context, workspace_path, git_branch = await self._loop_git_context(
+            cur, loop_id
+        )
+        message = commit_message or f"loop({loop_id}): dev implementation"
+        result = await self.git.commit_workspace(
+            workspace_path, loop_id, message, git_config
+        )
+        pushed = False
+        if result.get("hadChanges") and git_config.get("remoteUrl"):
+            pushed = await self.git.push_loop_branch(workspace_path, git_branch, git_config)
+
+        if result.get("hadChanges"):
+            context = {**context, "gitRef": result["commitSha"]}
+            await self.loops.update_context(cur, loop_id, context)
+
+        return {**result, "pushed": pushed, "branch": git_branch}
+
+    async def agent_progress_report(self, cur: Any, loop_id: str, body: dict[str, Any]) -> None:
+        label = body.get("label", "处理中…")
+        if body.get("updateBanner", True):
+            await self.publish_system_message(
+                cur,
+                loop_id,
+                label,
+                msg_type="progress",
+                extra={"agentId": body.get("agentId"), "detail": body.get("detail")},
+                run_id=body.get("runId"),
+            )
+        if "active" in body:
+            await event_bus.publish(
+                loop_id,
+                {
+                    "type": "processing",
+                    "active": bool(body["active"]),
+                    "agent": body.get("agentId"),
+                    "label": label if body.get("active") else None,
+                },
+            )
 
     async def update_loop_context(self, cur: Any, loop_id: str, context: dict) -> dict:
         loop = await self.loops.get_by_id(cur, loop_id)
