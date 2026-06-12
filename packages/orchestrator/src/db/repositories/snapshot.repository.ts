@@ -1,4 +1,5 @@
 import type { LoopContext, LoopSnapshot, Phase, PRDDocument, Task } from '@loop/shared';
+import { toIso8601Utc } from '../datetime.js';
 import { dbQuery, dbQueryOne, insertReturning, parseJsonField } from '../query.js';
 import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
@@ -104,7 +105,7 @@ export class SnapshotRepository {
       loopId: row.loop_id,
       phase: row.phase,
       label: row.label ?? '',
-      createdAt: row.created_at.toISOString(),
+      createdAt: toIso8601Utc(row.created_at),
       createdBy: row.created_by ?? 'system',
       prd: row.prd ?? undefined,
       tasks: row.tasks ?? undefined,

@@ -5,6 +5,7 @@ import {
 } from '@loop/shared';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
+import { toIso8601Utc } from '../db/datetime.js';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { DevelopmentService } from '../development/development.service.js';
@@ -308,7 +309,7 @@ export class ApprovalService {
       loopId: r.loop_id,
       phase: r.phase,
       approvedBy: r.approved_by,
-      approvedAt: r.created_at.toISOString(),
+      approvedAt: toIso8601Utc(r.created_at),
       note: r.note ?? undefined,
     }));
   }

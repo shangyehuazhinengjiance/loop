@@ -13,6 +13,7 @@ import { WorkspaceJobService } from '../workspace/workspace-job.service.js';
 import { LoopMemberService } from '../member/loop-member.service.js';
 import { InputRequirementsService } from '../requirements/input-requirements.service.js';
 import { LoopProgressService } from '../chat/loop-progress.service.js';
+import { serializeLoopRow, serializeProjectRow } from './loop-api.serializer.js';
 
 @Injectable()
 export class LoopService {
@@ -353,14 +354,17 @@ export class LoopService {
         id: project.id,
         name: project.name,
         gitConfig: project.git_config,
-        createdAt: project.created_at,
-        loops: (await this.loopRepo.listByProject(project.id)).map((loop) => ({
-          id: loop.id,
-          title: loop.title,
-          phase: loop.phase,
-          status: loop.status,
-          updatedAt: loop.updated_at,
-        })),
+        createdAt: serializeProjectRow(project).createdAt,
+        loops: (await this.loopRepo.listByProject(project.id)).map((loop) => {
+          const row = serializeLoopRow(loop);
+          return {
+            id: loop.id,
+            title: loop.title,
+            phase: loop.phase,
+            status: loop.status,
+            updatedAt: row.updatedAt,
+          };
+        }),
       })),
     );
   }
