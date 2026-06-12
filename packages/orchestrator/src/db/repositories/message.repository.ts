@@ -1,4 +1,5 @@
 import type { LoopMessage, Phase } from '@loop/shared';
+import { toIso8601Utc } from '../datetime.js';
 import { dbQuery, dbQueryOne, insertReturning, parseJsonField } from '../query.js';
 import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
@@ -100,7 +101,7 @@ export class MessageRepository {
       },
       content,
       metadata: {
-        timestamp: row.created_at.toISOString(),
+        timestamp: toIso8601Utc(row.created_at),
         ...(sdkMessageType ? { sdkMessageType } : {}),
       },
     };

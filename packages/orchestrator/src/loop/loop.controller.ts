@@ -24,6 +24,7 @@ import { ChatService } from '../chat/chat.service.js';
 import { SnapshotRepository } from '../db/repositories/snapshot.repository.js';
 import { ReplayService } from '../replay/replay.service.js';
 import { mergeGitConfig, defaultGitConfigFromEnv } from '../git/default-git-config.js';
+import { serializeLoopRow } from './loop-api.serializer.js';
 import { LoopService } from './loop.service.js';
 import { PhaseService } from '../phase/phase.service.js';
 import { AgentRunnerService } from '../agent/agent-runner.service.js';
@@ -133,7 +134,7 @@ export class LoopController {
     const loop = await this.loopService.getLoop(id);
     if (!loop) throw new NotFoundException('Loop not found');
     return {
-      ...loop,
+      ...serializeLoopRow(loop),
       processing: this.resolveLoopProcessing(id),
     };
   }

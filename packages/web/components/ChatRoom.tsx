@@ -880,7 +880,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           </div>
           <div className="chat-loop-header__meta">
             {loopCreatedAt ? (
-              <span>创建于 {formatLoopCreatedAt(loopCreatedAt)}（UTC+8）</span>
+              <span>创建于 {formatLoopCreatedAt(loopCreatedAt)}（本地时间）</span>
             ) : (
               <span style={{ color: '#6e7681' }}>{loopId.slice(0, 8)}…</span>
             )}

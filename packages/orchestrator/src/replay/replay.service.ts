@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { ArtifactRepository } from '../db/repositories/artifact.repository.js';
 import { MessageRepository } from '../db/repositories/message.repository.js';
 import { PhaseTransitionRepository } from '../db/repositories/phase-transition.repository.js';
+import { toIso8601Utc } from '../db/datetime.js';
 import { SnapshotRepository } from '../db/repositories/snapshot.repository.js';
 
 @Injectable()
@@ -62,7 +63,7 @@ export class ReplayService {
         toPhase: t.to_phase,
         trigger: t.trigger,
         snapshotId: t.snapshot_id ?? undefined,
-        createdAt: t.created_at.toISOString(),
+        createdAt: toIso8601Utc(t.created_at),
       })),
     };
   }

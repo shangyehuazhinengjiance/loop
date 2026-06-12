@@ -5,6 +5,7 @@ import {
 } from '@loop/shared';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
+import { toIso8601Utc } from '../db/datetime.js';
 import { ApprovalRepository } from '../db/repositories/approval.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { DevelopmentService } from '../development/development.service.js';
@@ -274,7 +275,6 @@ export class ApprovalService {
     if (!loop || loop.phase !== 'development') return;
 
     const routing = loop.context.agentRouting;
-    const wasExternalPause = routing?.suspendedDevelopmentMode === 'external';
     const suspended: AgentRole | undefined =
       this.agentCoordinator.getSuspendedAgent(loopId) ?? routing?.suspendedAgent;
 
@@ -289,7 +289,7 @@ export class ApprovalService {
       await this.agentCoordinator.cancel(loopId, 'pm');
     }
 
-    if (wasExternalPause) {
+    if (loop.context.development?.mode === 'external') {
       await this.developmentService.resumeExternalDevAfterPrdRevision(loopId);
       return;
     }
@@ -314,7 +314,7 @@ export class ApprovalService {
       loopId: r.loop_id,
       phase: r.phase,
       approvedBy: r.approved_by,
-      approvedAt: r.created_at.toISOString(),
+      approvedAt: toIso8601Utc(r.created_at),
       note: r.note ?? undefined,
     }));
   }
