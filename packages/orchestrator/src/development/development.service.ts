@@ -1,5 +1,4 @@
 import {
-  failureMentions,
   suggestAssignee,
   type DevelopmentConfig,
   type DevelopmentMode,
@@ -312,11 +311,6 @@ export class DevelopmentService {
     const repoLine = input.remoteUrl
       ? `- 仓库：\`${input.remoteUrl}\``
       : '- 仓库：未配置远程（请在工作区本地开发）';
-    const assignee = {
-      userId: input.assigneeUserId,
-      displayName: input.assigneeDisplayName,
-    };
-
     await this.chatService.publishAgentMessage({
       loopId: input.loopId,
       phase: 'development',
@@ -336,7 +330,7 @@ export class DevelopmentService {
           '',
           '> 仅被指派的负责人可确认「开发完成」。',
         ].join('\n'),
-        mentions: failureMentions(assignee),
+        mentions: [`@${input.assigneeUserId}`],
         actions: [
           {
             id: 'complete-external-dev',
