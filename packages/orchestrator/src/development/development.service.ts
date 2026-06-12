@@ -3,6 +3,7 @@ import {
   type DevelopmentConfig,
   type DevelopmentMode,
   type LoopContext,
+  type LoopMember,
 } from '@loop/shared';
 import {
   BadRequestException,
@@ -16,7 +17,7 @@ import { LoopMemberRepository } from '../db/repositories/loop-member.repository.
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ChatService } from '../chat/chat.service.js';
 import { PhaseService } from '../phase/phase.service.js';
-import { PrdPublishService } from './prd-publish.service.js';
+import { PrdPublishService, type PrdPublishResult } from './prd-publish.service.js';
 
 @Injectable()
 export class DevelopmentService {
@@ -186,7 +187,6 @@ export class DevelopmentService {
         assigneeDisplayName: assignee.displayName,
       });
 
-      const branch = published.branch;
       const now = new Date().toISOString();
       const development: DevelopmentConfig = {
         prdApprovedBy,
@@ -197,23 +197,16 @@ export class DevelopmentService {
           prdCommitSha: published.commitSha,
           prdPushedAt: now,
           handoffAt: now,
-          targetBranch: branch,
+          targetBranch: published.branch,
         },
       };
 
-      await this.loopRepo.updateContext(loopId, {
-        ...loop.context,
-        development,
-      });
-
-      await this.applyExternalDevBlocker(loopId, assignee, branch, now);
-      await this.publishExternalHandoffCard({
+      await this.finalizeExternalDevHandoff({
         loopId,
-        assigneeUserId: assignee.userId,
-        assigneeDisplayName: assignee.displayName,
-        branch,
-        commitSha: published.commitSha,
-        remoteUrl: published.remoteUrl,
+        assignee,
+        published,
+        development,
+        preamble: undefined,
       });
     } finally {
       this.chatService.emitProcessing({ loopId, active: false });
@@ -246,36 +239,109 @@ export class DevelopmentService {
       });
       const now = new Date().toISOString();
 
-      await this.loopRepo.updateContext(loopId, {
-        ...loop.context,
-        development: {
-          ...dev,
-          external: {
-            ...external,
-            prdCommitSha: published.commitSha,
-            prdPushedAt: now,
-          },
+      const development: DevelopmentConfig = {
+        ...dev,
+        external: {
+          ...external,
+          prdCommitSha: published.commitSha,
+          prdPushedAt: now,
         },
-      });
+      };
 
-      await this.applyExternalDevBlocker(
+      await this.finalizeExternalDevHandoff({
         loopId,
         assignee,
-        published.branch,
-        now,
-      );
-      await this.publishExternalHandoffCard({
-        loopId,
-        assigneeUserId: assignee.userId,
-        assigneeDisplayName: assignee.displayName,
-        branch: published.branch,
-        commitSha: published.commitSha,
-        remoteUrl: published.remoteUrl,
+        published,
+        development,
         preamble: '> PRD 已修订确认，请基于最新 PRD 继续开发。\n',
       });
     } finally {
       this.chatService.emitProcessing({ loopId, active: false });
     }
+  }
+
+  private async finalizeExternalDevHandoff(input: {
+    loopId: string;
+    assignee: LoopMember;
+    published: PrdPublishResult;
+    development: DevelopmentConfig;
+    preamble?: string;
+  }): Promise<void> {
+    const { loopId, assignee, published, development } = input;
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) return;
+
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      development,
+    });
+
+    const now = new Date().toISOString();
+    let preamble = input.preamble ?? '';
+
+    if (published.pushStatus === 'failed') {
+      await this.notifyGitPushFailure({
+        loopId,
+        assignee,
+        published,
+      });
+      preamble +=
+        '\n> ⚠️ 远程推送失败，已 @成员协助处理 Git 同步。本地 PRD 已更新，可先基于工作区继续。\n';
+    }
+
+    await this.applyExternalDevBlocker(
+      loopId,
+      assignee,
+      published.branch,
+      now,
+    );
+    await this.publishExternalHandoffCard({
+      loopId,
+      assigneeUserId: assignee.userId,
+      assigneeDisplayName: assignee.displayName,
+      branch: published.branch,
+      commitSha: published.commitSha,
+      remoteUrl: published.remoteUrl,
+      preamble: preamble || undefined,
+    });
+  }
+
+  /** Git push 失败：@ 擅长 Git 的成员处理，不中断 API */
+  private async notifyGitPushFailure(input: {
+    loopId: string;
+    assignee: LoopMember;
+    published: PrdPublishResult;
+  }): Promise<void> {
+    const members = await this.memberRepo.listByLoop(input.loopId);
+    const gitContact =
+      suggestAssignee(members, 'Git 推送 合并 rebase DevOps') ?? input.assignee;
+    const errDetail = input.published.pushError?.trim() ?? '未知错误';
+
+    await this.chatService.publishAgentMessage({
+      loopId: input.loopId,
+      phase: 'development',
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: [
+          '⚠️ **Git 推送失败**',
+          '',
+          `@${gitContact.userId}（${gitContact.displayName}）请协助处理：`,
+          '',
+          `- 分支：\`${input.published.branch}\``,
+          `- 本地提交：\`${input.published.commitSha.slice(0, 8)}\``,
+          '',
+          '远程分支已有新提交，通常需要先 `git pull --rebase` 再 push。',
+          '',
+          '```',
+          errDetail,
+          '```',
+          '',
+          '> 处理完成后可继续外部开发；PRD 已在 Loop 工作区本地提交。',
+        ].join('\n'),
+        mentions: [`@${gitContact.userId}`],
+      },
+    });
   }
 
   private async applyExternalDevBlocker(
