@@ -372,6 +372,8 @@ export type AgentRole = 'pm' | 'dev' | 'ops';
 /** 跨阶段 @mention 触发的 Agent 挂起状态（持久化，便于恢复） */
 export interface AgentRoutingState {
   suspendedAgent?: AgentRole;
+  /** 挂起时的开发模式（外部工具暂停后用于恢复交接卡） */
+  suspendedDevelopmentMode?: DevelopmentMode;
   suspendedAt?: string;
   suspendedBy?: string;
 }

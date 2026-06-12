@@ -171,7 +171,7 @@ export class PhaseService {
       agentId: 'orchestrator',
       content: {
         type: 'text',
-        body: `PRD 修订已确认（by ${approvedBy}${note ? `：${note}` : ''}），Dev Agent 将恢复开发。`,
+        body: `PRD 修订已确认（by ${approvedBy}${note ? `：${note}` : ''}），开发流程将恢复继续。`,
       },
     });
 

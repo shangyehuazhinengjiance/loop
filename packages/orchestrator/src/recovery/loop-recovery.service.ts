@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { BlockerService } from '../blocker/blocker.service.js';
 import { ChatService } from '../chat/chat.service.js';
+import { DevelopmentService } from '../development/development.service.js';
 import { DeploymentService } from '../deployment/deployment.service.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
@@ -19,6 +20,7 @@ export class LoopRecoveryService {
     private readonly deploymentService: DeploymentService,
     private readonly chatService: ChatService,
     private readonly agentCoordinator: AgentCoordinator,
+    private readonly developmentService: DevelopmentService,
   ) {}
 
   /** 一键恢复：解除阻塞、重试卡住的部署步骤 */
@@ -97,6 +99,15 @@ export class LoopRecoveryService {
       hints.push(
         'Dev Agent 处于挂起状态（等待 PRD 修订确认）。请完成 PM 讨论并点击「确认需求修订」，或 @dev-agent 手动恢复。',
       );
+    } else if (
+      fresh.phase === 'development' &&
+      fresh.context.development?.mode === 'external' &&
+      fresh.context.development.external &&
+      (fresh.status === 'blocked' ||
+        (fresh.status === 'active' && !fresh.blocker))
+    ) {
+      await this.developmentService.resumeExternalDevAfterPrdRevision(loopId);
+      actions.push('已重新发布外部开发交接卡（含「开发完成，进入部署」按钮）');
     } else if (fresh.phase === 'development' && fresh.context.development?.mode === 'agent') {
       await this.agentCoordinator.activate(loopId, 'dev', {
         reason: 'manual',
