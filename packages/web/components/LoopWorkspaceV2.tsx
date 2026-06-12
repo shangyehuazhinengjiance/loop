@@ -40,6 +40,19 @@ function processingLabelFromEvent(data: {
   return `${name} 处理中…`;
 }
 
+function friendlyActionError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { detail?: string };
+    if (parsed.detail) raw = parsed.detail;
+  } catch {
+    // plain text
+  }
+  const map: Record<string, string> = {
+    'Run already finished': '该步骤已完成，无需重复确认',
+  };
+  return map[raw] ?? raw;
+}
+
 function toChatModel(m: Message, index: number): ChatMessageModel {
   return {
     id: m.id || `local-${index}`,
@@ -59,6 +72,8 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
   const [sendError, setSendError] = useState('');
   const [boardTick, setBoardTick] = useState(0);
   const [actionPending, setActionPending] = useState<string | null>(null);
+  const [actionHint, setActionHint] = useState<string | null>(null);
+  const [doneActions, setDoneActions] = useState<Set<string>>(() => new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const userId = 'user-local';
   const displayName = '本地用户';
@@ -134,22 +149,41 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
 
   const postAction = async (action: string, runId?: string) => {
     const key = `${action}:${runId ?? ''}`;
+    if (doneActions.has(key)) {
+      setActionHint('该操作已完成，无需重复点击');
+      return;
+    }
     setActionPending(key);
     setSendError('');
+    setActionHint(null);
     try {
       const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, runId, userId, displayName }),
       });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => '');
-        throw new Error(detail || `HTTP ${res.status}`);
+      const body = await res.text();
+      let data: { alreadyDone?: boolean; message?: string; ok?: boolean } = {};
+      try {
+        data = body ? (JSON.parse(body) as typeof data) : {};
+      } catch {
+        // non-json
       }
+      if (!res.ok) {
+        throw new Error(friendlyActionError(body || `HTTP ${res.status}`));
+      }
+      if (data.alreadyDone) {
+        setActionHint(data.message ?? '该步骤已完成，无需重复确认');
+        setDoneActions((prev) => new Set(prev).add(key));
+        return;
+      }
+      setDoneActions((prev) => new Set(prev).add(key));
       setProcessingLabel(null);
       setBoardTick((t) => t + 1);
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : '操作失败');
+      setSendError(
+        e instanceof Error ? friendlyActionError(e.message) : '操作失败',
+      );
     } finally {
       setActionPending(null);
     }
@@ -194,17 +228,24 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
                           <>
                             {m.content.actions!.map((a) => {
                               const runId = a.runId ?? messages[i]?.runId;
-                              const pending =
-                                actionPending === `${a.action}:${runId ?? ''}`;
+                              const actionKey = `${a.action}:${runId ?? ''}`;
+                              const pending = actionPending === actionKey;
+                              const done = doneActions.has(actionKey);
                               return (
                                 <button
                                   key={a.id}
                                   type="button"
                                   className="v2-action-btn"
-                                  disabled={pending || Boolean(actionPending)}
+                                  disabled={
+                                    done || pending || Boolean(actionPending)
+                                  }
                                   onClick={() => postAction(a.action, runId)}
                                 >
-                                  {pending ? '处理中…' : a.label}
+                                  {done
+                                    ? '已确认'
+                                    : pending
+                                      ? '处理中…'
+                                      : a.label}
                                 </button>
                               );
                             })}
@@ -226,6 +267,7 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
                 发送
               </button>
             </div>
+            {actionHint && <p className="v2-action-hint">{actionHint}</p>}
             {sendError && <p className="ws-error">{sendError}</p>}
           </section>
         </div>

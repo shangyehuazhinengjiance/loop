@@ -668,6 +668,17 @@ button {
   color: #fff;
 }
 
+.v2-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.v2-action-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #8b949e;
+}
+
 .v2-home {
   max-width: 480px;
   margin: 40px auto;

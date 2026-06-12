@@ -873,6 +873,25 @@ class LoopService:
                 return latest["id"]
         return None
 
+    async def _has_done_run_for_template(
+        self, cur: Any, loop_id: str, template_id: str
+    ) -> bool:
+        instances = await self.workstreams.list_instances(cur, loop_id)
+        for inst in instances:
+            if inst["template_id"] != template_id:
+                continue
+            latest = await self.workstreams.latest_run_for_instance(cur, inst["id"])
+            if latest and latest["status"] == "done":
+                return True
+        return False
+
+    def _already_done_message(self, action: str) -> str:
+        return {
+            "approve_prd": "需求已确认过，无需重复操作",
+            "approve_dev": "开发验收已确认过，无需重复操作",
+            "approve_deploy": "部署已确认过，无需重复操作",
+        }.get(action, "该步骤已完成，无需重复操作")
+
     async def handle_action(
         self,
         cur: Any,
@@ -886,15 +905,28 @@ class LoopService:
             return {"ok": True, "dismissed": True}
 
         if not run_id and action in APPROVAL_ACTION_TEMPLATES:
-            run_id = await self._find_run_for_template(
-                cur, loop_id, APPROVAL_ACTION_TEMPLATES[action]
-            )
+            template_id = APPROVAL_ACTION_TEMPLATES[action]
+            run_id = await self._find_run_for_template(cur, loop_id, template_id)
             if not run_id:
-                tpl_name = APPROVAL_ACTION_TEMPLATES[action]
-                raise ValueError(f"未找到进行中的「{tpl_name}」子任务流，无法确认")
+                if await self._has_done_run_for_template(cur, loop_id, template_id):
+                    return {
+                        "ok": True,
+                        "alreadyDone": True,
+                        "message": self._already_done_message(action),
+                    }
+                raise ValueError(f"未找到进行中的「{template_id}」子任务流，无法确认")
 
         if run_id:
-            run = await self.complete_run(cur, loop_id, run_id)
+            try:
+                run = await self.complete_run(cur, loop_id, run_id)
+            except ValueError as exc:
+                if str(exc) == "Run already finished":
+                    return {
+                        "ok": True,
+                        "alreadyDone": True,
+                        "message": self._already_done_message(action),
+                    }
+                raise
             label = {
                 "approve_prd": "PRD 已确认",
                 "approve_dev": "开发验收已通过",
