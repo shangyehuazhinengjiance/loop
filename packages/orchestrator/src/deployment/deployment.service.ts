@@ -15,7 +15,9 @@ import { ChatService } from '../chat/chat.service.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
+import { GitContinueService } from '../git/git-continue.service.js';
 import { GitService } from '../git/git.service.js';
+import { isGitSyncConflictError } from '../git/git-sync-conflict.error.js';
 import {
   isNoCommitsBetweenBranchesError,
   MergeRequestService,
@@ -26,6 +28,7 @@ import { SecretManager } from '../git/secret-manager.js';
 export class DeploymentService {
   constructor(
     private readonly gitService: GitService,
+    private readonly gitContinue: GitContinueService,
     private readonly loopRepo: LoopRepository,
     private readonly memberRepo: LoopMemberRepository,
     private readonly chatService: ChatService,
@@ -34,6 +37,31 @@ export class DeploymentService {
     private readonly agentCoordinator: AgentCoordinator,
     private readonly secretManager: SecretManager,
   ) {}
+
+  /** Git 冲突解决后：仅 push 并创建测试分支 MR */
+  async continueAfterGitConflict(
+    loopId: string,
+    approvedBy?: string,
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) return;
+
+    const devMode = loop.context.development?.mode;
+    this.chatService.emitProcessing({
+      loopId,
+      active: true,
+      label: '正在继续 Git 推送与 MR 创建…',
+    });
+
+    try {
+      if (devMode !== 'external') {
+        await this.gitService.pushLoopBranch(loopId);
+      }
+      await this.createTestBranchMrAndNotify(loopId, approvedBy);
+    } finally {
+      this.chatService.emitProcessing({ loopId, active: false });
+    }
+  }
 
   /**
    * 部署阶段：创建 loop → test MR，@ 合并负责人（不启动 Ops Agent，除非项目为 agent 模式）。
@@ -46,21 +74,6 @@ export class DeploymentService {
     if (!loop) return;
 
     const members = await this.memberRepo.listByLoop(loopId);
-    const projectEntity = await this.projectRepo.findById(loop.project_id);
-    const gitConfig = projectEntity?.git_config as Record<string, unknown> | undefined;
-    const executionMode = resolveDeploymentExecution(gitConfig);
-
-    let mergeAssignee = pickNotifyMember(members, {
-      preferUserId: approvedBy,
-      skillsHint:
-        process.env.DEPLOY_MERGE_SKILLS ?? '运维 合并 MR 代码评审',
-    });
-    if (!mergeAssignee && approvedBy) {
-      mergeAssignee =
-        members.find((m) => m.userId === approvedBy) ?? members[0] ?? null;
-    }
-    const targetBranch = testBranch();
-    const prodBranch = productionBranch();
     const headBranch = loop.git_branch ?? `loop/${loopId}`;
 
     this.chatService.emitProcessing({
@@ -70,6 +83,8 @@ export class DeploymentService {
     });
 
     try {
+      const projectEntity = await this.projectRepo.findById(loop.project_id);
+      const gitConfig = projectEntity?.git_config as Record<string, unknown> | undefined;
       if (!gitConfig?.remoteUrl) {
         throw new Error('项目未配置 gitConfig.remoteUrl');
       }
@@ -80,104 +95,27 @@ export class DeploymentService {
           loopId,
           `loop ${loopId}: development complete`,
         );
-        await this.gitService.pushLoopBranch(loopId);
+        try {
+          await this.gitService.pushLoopBranch(loopId);
+        } catch (err) {
+          if (isGitSyncConflictError(err)) {
+            await this.gitContinue.reportConflict(loopId, {
+              branch: err.branch,
+              detail: err.detail || err.message,
+              retry: { type: 'deployment_push_mr', approvedBy },
+              preferUserId: approvedBy,
+            });
+            return;
+          }
+          throw err;
+        }
       }
 
-      const mrCredentialRef = this.secretManager.resolveMrApiCredentialRef(
-        gitConfig as { mrCredentialRef?: string },
-      );
-
-      const mr = await this.mergeRequestService.createOrGetMergeRequest({
-        remoteUrl: String(gitConfig.remoteUrl),
-        credentialRef: mrCredentialRef,
-        headBranch,
-        baseBranch: targetBranch,
-        title: `loop ${loopId}: ${loop.title}`,
-        body: [
-          `## Loop 部署合并请求（测试分支）`,
-          '',
-          `- Loop ID: \`${loopId}\``,
-          `- 标题: ${loop.title}`,
-          `- 源分支: \`${headBranch}\``,
-          `- 目标分支: \`${targetBranch}\``,
-          `- 部署方式: ${executionMode === 'manual' ? '人工部署' : 'Ops Agent 自动部署'}`,
-          devMode === 'external' ? '- 开发方式: 外部工具' : '- 开发方式: Loop Dev Agent',
-          '',
-          '由 Loop Orchestrator 自动创建。',
-        ].join('\n'),
-      });
-
-      const now = new Date().toISOString();
-      await this.loopRepo.updateContext(loopId, {
-        ...loop.context,
-        deployment: {
-          ...loop.context.deployment,
-          status: 'pending',
-          executionMode,
-          step: 'awaiting_mr_merge',
-          targetBranch,
-          productionBranch: prodBranch,
-          mergeRequest: mr,
-          mergeAssigneeUserId: mergeAssignee?.userId,
-          mergeAssigneeDisplayName: mergeAssignee?.displayName,
-        },
-      });
-
-      if (mergeAssignee) {
-        await this.loopRepo.updateBlocker(
-          loopId,
-          {
-            kind: 'human_decision' as const,
-            phase: 'deployment' as const,
-            reason: `等待合并 MR：\`${headBranch}\` → \`${targetBranch}\``,
-            question: mr.url,
-            assigneeUserId: mergeAssignee.userId,
-            assigneeDisplayName: mergeAssignee.displayName,
-            requestedBy: 'orchestrator' as const,
-            createdAt: now,
-          },
-          'blocked',
-        );
-      }
-
-      const mention = this.formatMention(mergeAssignee, members, '运维');
-      const afterMergeNote =
-        executionMode === 'manual'
-          ? '合并完成后点击「MR 已合并」，系统将通知同事**手动部署测试环境**并验证。'
-          : '合并完成后点击「MR 已合并」，将启动 Ops Agent 部署测试环境。';
-
-      const body = [
-        '## 请合并 MR 到测试分支',
-        '',
-        `- MR：[${mr.provider === 'gitlab' ? '!' : '#'}${mr.number}](${mr.url})`,
-        `- 源分支：\`${headBranch}\``,
-        `- 目标分支：\`${targetBranch}\``,
-        `- 部署方式：**${executionMode === 'manual' ? '人工部署' : 'Ops Agent'}**`,
-        '',
-        `请 ${mention} 在 Git 平台 **Review 并合并** 该 MR。`,
-        '',
-        afterMergeNote,
-      ].join('\n');
-
-      await this.chatService.publishAgentMessage({
-        loopId,
-        phase: 'deployment',
-        agentId: 'orchestrator',
-        content: {
-          type: 'artifact',
-          body,
-          mentions: mergeAssignee ? failureMentions(mergeAssignee) : undefined,
-          actions: [
-            {
-              id: 'confirm-mr-merged',
-              label: 'MR 已合并',
-              action: 'confirm_mr_merged',
-            },
-          ],
-        },
-      });
+      await this.createTestBranchMrAndNotify(loopId, approvedBy);
     } catch (err) {
+      if (isGitSyncConflictError(err)) return;
       const detail = err instanceof Error ? err.message : String(err);
+      const targetBranch = testBranch();
       const fallback = pickNotifyMember(members, {
         preferUserId: approvedBy,
         skillsHint: '运维 CI 流水线',
@@ -770,6 +708,131 @@ export class DeploymentService {
     await this.agentCoordinator.activate(loopId, 'ops', {
       reason: 'manual',
       userId,
+    });
+  }
+
+  private async createTestBranchMrAndNotify(
+    loopId: string,
+    approvedBy?: string,
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) return;
+
+    const members = await this.memberRepo.listByLoop(loopId);
+    const projectEntity = await this.projectRepo.findById(loop.project_id);
+    const gitConfig = projectEntity?.git_config as Record<string, unknown> | undefined;
+    if (!gitConfig?.remoteUrl) {
+      throw new Error('项目未配置 gitConfig.remoteUrl');
+    }
+
+    const executionMode = resolveDeploymentExecution(gitConfig);
+    let mergeAssignee = pickNotifyMember(members, {
+      preferUserId: approvedBy,
+      skillsHint:
+        process.env.DEPLOY_MERGE_SKILLS ?? '运维 合并 MR 代码评审',
+    });
+    if (!mergeAssignee && approvedBy) {
+      mergeAssignee =
+        members.find((m) => m.userId === approvedBy) ?? members[0] ?? null;
+    }
+
+    const targetBranch = testBranch();
+    const prodBranch = productionBranch();
+    const headBranch = loop.git_branch ?? `loop/${loopId}`;
+    const devMode = loop.context.development?.mode;
+
+    const mrCredentialRef = this.secretManager.resolveMrApiCredentialRef(
+      gitConfig as { mrCredentialRef?: string },
+    );
+
+    const mr = await this.mergeRequestService.createOrGetMergeRequest({
+      remoteUrl: String(gitConfig.remoteUrl),
+      credentialRef: mrCredentialRef,
+      headBranch,
+      baseBranch: targetBranch,
+      title: `loop ${loopId}: ${loop.title}`,
+      body: [
+        `## Loop 部署合并请求（测试分支）`,
+        '',
+        `- Loop ID: \`${loopId}\``,
+        `- 标题: ${loop.title}`,
+        `- 源分支: \`${headBranch}\``,
+        `- 目标分支: \`${targetBranch}\``,
+        `- 部署方式: ${executionMode === 'manual' ? '人工部署' : 'Ops Agent 自动部署'}`,
+        devMode === 'external' ? '- 开发方式: 外部工具' : '- 开发方式: Loop Dev Agent',
+        '',
+        '由 Loop Orchestrator 自动创建。',
+      ].join('\n'),
+    });
+
+    const now = new Date().toISOString();
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      deployment: {
+        ...loop.context.deployment,
+        status: 'pending',
+        executionMode,
+        step: 'awaiting_mr_merge',
+        targetBranch,
+        productionBranch: prodBranch,
+        mergeRequest: mr,
+        mergeAssigneeUserId: mergeAssignee?.userId,
+        mergeAssigneeDisplayName: mergeAssignee?.displayName,
+      },
+    });
+
+    if (mergeAssignee) {
+      await this.loopRepo.updateBlocker(
+        loopId,
+        {
+          kind: 'human_decision' as const,
+          phase: 'deployment' as const,
+          reason: `等待合并 MR：\`${headBranch}\` → \`${targetBranch}\``,
+          question: mr.url,
+          assigneeUserId: mergeAssignee.userId,
+          assigneeDisplayName: mergeAssignee.displayName,
+          requestedBy: 'orchestrator' as const,
+          createdAt: now,
+        },
+        'blocked',
+      );
+    }
+
+    const mention = this.formatMention(mergeAssignee, members, '运维');
+    const afterMergeNote =
+      executionMode === 'manual'
+        ? '合并完成后点击「MR 已合并」，系统将通知同事**手动部署测试环境**并验证。'
+        : '合并完成后点击「MR 已合并」，将启动 Ops Agent 部署测试环境。';
+
+    const body = [
+      '## 请合并 MR 到测试分支',
+      '',
+      `- MR：[${mr.provider === 'gitlab' ? '!' : '#'}${mr.number}](${mr.url})`,
+      `- 源分支：\`${headBranch}\``,
+      `- 目标分支：\`${targetBranch}\``,
+      `- 部署方式：**${executionMode === 'manual' ? '人工部署' : 'Ops Agent'}**`,
+      '',
+      `请 ${mention} 在 Git 平台 **Review 并合并** 该 MR。`,
+      '',
+      afterMergeNote,
+    ].join('\n');
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: 'deployment',
+      agentId: 'orchestrator',
+      content: {
+        type: 'artifact',
+        body,
+        mentions: mergeAssignee ? failureMentions(mergeAssignee) : undefined,
+        actions: [
+          {
+            id: 'confirm-mr-merged',
+            label: 'MR 已合并',
+            action: 'confirm_mr_merged',
+          },
+        ],
+      },
     });
   }
 

@@ -15,6 +15,7 @@ import { MessageRepository } from './db/repositories/message.repository.js';
 import { PhaseTransitionRepository } from './db/repositories/phase-transition.repository.js';
 import { ProjectRepository } from './db/repositories/project.repository.js';
 import { SnapshotRepository } from './db/repositories/snapshot.repository.js';
+import { GitContinueService } from './git/git-continue.service.js';
 import { GitService } from './git/git.service.js';
 import { SecretManager } from './git/secret-manager.js';
 import { LoopController } from './loop/loop.controller.js';
@@ -60,6 +61,7 @@ import { LoopDotLoopService } from './loop-context/loop-dot-loop.service.js';
     ModelRouter,
     SecretManager,
     GitService,
+    GitContinueService,
     ArtifactService,
     AuditService,
     ReplayService,

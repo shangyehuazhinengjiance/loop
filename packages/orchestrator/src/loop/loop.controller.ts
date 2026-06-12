@@ -33,6 +33,7 @@ import { LoopEntryService } from '../requirements/loop-entry.service.js';
 import { LoopRecoveryService } from '../recovery/loop-recovery.service.js';
 import { LoopProgressService } from '../chat/loop-progress.service.js';
 import { PmUnderstandingService } from '../requirements/pm-understanding.service.js';
+import { GitContinueService } from '../git/git-continue.service.js';
 import { LoopDotLoopService } from '../loop-context/loop-dot-loop.service.js';
 import type { DevelopmentMode } from '@loop/shared';
 
@@ -58,6 +59,7 @@ export class LoopController {
     private readonly loopProgress: LoopProgressService,
     private readonly pmUnderstanding: PmUnderstandingService,
     private readonly loopDotLoop: LoopDotLoopService,
+    private readonly gitContinue: GitContinueService,
   ) {}
 
   @Get('projects')
@@ -284,6 +286,16 @@ export class LoopController {
     if (!body.userId) throw new BadRequestException('userId required');
     await this.memberService.requireMember(id, body.userId);
     return this.loopDotLoop.retrySync(id, body.userId);
+  }
+
+  @Post('loops/:id/git/continue')
+  async continueGitAfterConflict(
+    @Param('id') id: string,
+    @Body() body: { userId: string },
+  ) {
+    if (!body.userId) throw new BadRequestException('userId required');
+    await this.memberService.requireMember(id, body.userId);
+    return this.gitContinue.continueAfterConflict(id, body.userId);
   }
 
   @Post('loops/:id/agent/blocker')

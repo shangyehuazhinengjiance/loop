@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { GitSyncConflictError } from './git-sync-conflict.error.js';
 import { access, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Phase } from '@loop/shared';
@@ -240,11 +241,7 @@ export class GitService {
       throw new Error('无法获取当前 commit');
     }
 
-    await runCommand(
-      'git',
-      ['push', 'origin', `HEAD:${targetBranch}`],
-      { cwd, env: gitEnv },
-    );
+    await this.pushRefToRemote(cwd, `HEAD:${targetBranch}`, gitEnv);
 
     return { commitSha, hadChanges };
   }
@@ -253,17 +250,113 @@ export class GitService {
     const loop = await this.loopRepo.findById(loopId);
     if (!loop?.workspace_path || !loop.git_branch) return;
 
-    const project = await this.projectRepo.findById(loop.project_id);
+    const gitEnv = await this.gitEnvForProject(loop.project_id);
+    await this.pushBranchWithRemoteSync(
+      loop.workspace_path,
+      loop.git_branch,
+      gitEnv,
+    );
+  }
+
+  private async gitEnvForProject(projectId: string): Promise<NodeJS.ProcessEnv> {
+    const project = await this.projectRepo.findById(projectId);
     const gitConfig = project?.git_config as { credentialRef?: string } | undefined;
     const credential = await this.secretManager.get(
       gitConfig?.credentialRef ?? 'GIT_ACCESS_TOKEN',
     );
+    return this.secretManager.gitEnv(credential);
+  }
 
-    await runCommand(
-      'git',
-      ['push', '-u', 'origin', loop.git_branch],
-      { cwd: loop.workspace_path, env: this.secretManager.gitEnv(credential) },
-    );
+  private commandErrorText(err: unknown): string {
+    if (!(err instanceof Error)) return String(err);
+    const extra = err as Error & { stderr?: string; stdout?: string };
+    return [err.message, extra.stderr, extra.stdout].filter(Boolean).join('\n');
+  }
+
+  private isPushRejectedError(err: unknown): boolean {
+    return /rejected|non-fast-forward|fetch first/i.test(this.commandErrorText(err));
+  }
+
+  private async remoteBranchExists(
+    cwd: string,
+    branch: string,
+  ): Promise<boolean> {
+    try {
+      await runCommand('git', ['rev-parse', '--verify', `refs/remotes/origin/${branch}`], {
+        cwd,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 将远程分支变更 rebase 到本地后再推送，避免 non-fast-forward 失败 */
+  private async rebaseOntoRemoteBranch(
+    cwd: string,
+    branch: string,
+    gitEnv: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    await runCommand('git', ['fetch', 'origin', branch], { cwd, env: gitEnv });
+    if (!(await this.remoteBranchExists(cwd, branch))) return;
+
+    const { stdout: dirty } = await runCommand('git', ['status', '--porcelain'], { cwd });
+    if (dirty.trim()) {
+      throw new Error('工作区有未提交改动，无法与远程分支同步');
+    }
+
+    try {
+      await runCommand('git', ['pull', '--rebase', 'origin', branch], { cwd, env: gitEnv });
+    } catch (err) {
+      try {
+        await runCommand('git', ['rebase', '--abort'], { cwd, env: gitEnv });
+      } catch {
+        /* ignore */
+      }
+      const detail = this.commandErrorText(err).slice(0, 500);
+      throw new GitSyncConflictError(
+        `无法与远程分支 \`${branch}\` 同步（rebase 冲突）。请在本地或 Git 平台解决冲突后重试。`,
+        branch,
+        detail,
+      );
+    }
+  }
+
+  private async pushRefToRemote(
+    cwd: string,
+    refspec: string,
+    gitEnv: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    try {
+      await runCommand('git', ['push', 'origin', refspec], { cwd, env: gitEnv });
+    } catch (err) {
+      if (!this.isPushRejectedError(err)) throw err;
+      if (refspec.startsWith('HEAD:')) {
+        const target = refspec.split(':')[1]!;
+        await runCommand('git', ['fetch', 'origin', target], { cwd, env: gitEnv }).catch(
+          () => undefined,
+        );
+        throw new Error(
+          `推送到 \`${target}\` 被拒绝：远程已有本地没有的提交。请通过 MR 合并，或人工处理后再试。`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  private async pushBranchWithRemoteSync(
+    cwd: string,
+    branch: string,
+    gitEnv: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    await this.rebaseOntoRemoteBranch(cwd, branch, gitEnv);
+    try {
+      await runCommand('git', ['push', '-u', 'origin', branch], { cwd, env: gitEnv });
+    } catch (err) {
+      if (!this.isPushRejectedError(err)) throw err;
+      await this.rebaseOntoRemoteBranch(cwd, branch, gitEnv);
+      await runCommand('git', ['push', '-u', 'origin', branch], { cwd, env: gitEnv });
+    }
   }
 
   private async gitInitEmpty(workspacePath: string): Promise<void> {

@@ -187,6 +187,21 @@ export interface DevelopmentConfig {
   external?: ExternalDevelopmentInfo;
 }
 
+/** Git 冲突解决后需重试的操作 */
+export type GitPendingRetry =
+  | { type: 'loop_dot_loop_push_mr'; completedBy?: string }
+  | { type: 'deployment_push_mr'; approvedBy?: string }
+  | { type: 'push_only' };
+
+export interface GitPendingOperation {
+  retry: GitPendingRetry;
+  branch: string;
+  errorDetail: string;
+  createdAt: string;
+  assigneeUserId?: string;
+  assigneeDisplayName?: string;
+}
+
 export interface LoopContext {
   prd?: PRDDocument;
   tasks?: Task[];
@@ -197,6 +212,8 @@ export interface LoopContext {
   development?: DevelopmentConfig;
   /** 创建时导入的外部需求文档（已写入 Git 工作区） */
   inputRequirements?: InputRequirementsDocument;
+  /** Git push/rebase 冲突后等待人工解决并继续 */
+  gitPending?: GitPendingOperation;
 }
 
 export interface LoopGitConfig {

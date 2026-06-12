@@ -116,6 +116,12 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [phase, setPhase] = useState('created');
   const [loopStatus, setLoopStatus] = useState('active');
   const [blocker, setBlocker] = useState<LoopBlocker | null>(null);
+  const [gitPending, setGitPending] = useState<{
+    branch: string;
+    errorDetail?: string;
+    assigneeUserId?: string;
+    assigneeDisplayName?: string;
+  } | null>(null);
   const [members, setMembers] = useState<LoopMember[]>([]);
   const [memberChecked, setMemberChecked] = useState(false);
   const [joined, setJoined] = useState(false);
@@ -160,6 +166,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
     );
     setLoopStatus(loop.status ?? 'active');
     setBlocker(loop.blocker ?? null);
+    setGitPending(loop.context?.gitPending ?? null);
     setAgentProcessing(
       loop.processing?.active && loop.processing.label ? loop.processing.label : null,
     );
@@ -356,6 +363,12 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   function canResolveBlocker(): boolean {
     if (!user || !blocker) return false;
     return blocker.assigneeUserId === user.userId;
+  }
+
+  function canContinueGitConflict(): boolean {
+    if (!user || !gitPending) return false;
+    const assignee = gitPending.assigneeUserId ?? blocker?.assigneeUserId;
+    return !assignee || assignee === user.userId;
   }
 
   function scrollToMention(messageId: string) {
@@ -733,6 +746,26 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       }
       if (data.hints?.length) {
         alert(['已执行：', ...(data.actions ?? []), '', '提示：', ...data.hints].join('\n'));
+      }
+      await refreshLoop();
+    } finally {
+      setClientPending(null);
+    }
+  }
+
+  async function continueGitAfterConflict() {
+    if (!user || busy || !gitPending) return;
+    setClientPending('正在继续 Git 同步…');
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/git/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.userId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { message?: string }).message ?? '继续 Git 同步失败');
+        return;
       }
       await refreshLoop();
     } finally {
@@ -1214,6 +1247,41 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           ) : isMasterMrMergePending() ? (
             <div style={{ color: '#8b949e', marginTop: 8, fontSize: 13 }}>
               请在 Git 平台合并上线 MR 后，点击下方「部署操作」栏中的「上线 MR 已合并」。
+            </div>
+          ) : gitPending ? (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ color: '#8b949e', fontSize: 13, marginBottom: 8 }}>
+                请在仓库工作区或 Git 平台解决分支{' '}
+                <code style={{ color: '#e6edf3' }}>{gitPending.branch}</code>{' '}
+                的冲突后，点击下方按钮由系统自动重试推送。
+                {gitPending.errorDetail && (
+                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+                    {gitPending.errorDetail.slice(0, 200)}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void continueGitAfterConflict()}
+                disabled={busy || !canContinueGitConflict()}
+                title={
+                  canContinueGitConflict()
+                    ? undefined
+                    : `仅 @${gitPending.assigneeDisplayName ?? gitPending.assigneeUserId} 可继续`
+                }
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #9e6a03',
+                  background: '#238636',
+                  color: '#fff',
+                  fontSize: 13,
+                  cursor: busy || !canContinueGitConflict() ? 'not-allowed' : 'pointer',
+                  opacity: busy || !canContinueGitConflict() ? 0.7 : 1,
+                }}
+              >
+                {clientPending === '正在继续 Git 同步…' ? '处理中…' : '冲突已解决，继续'}
+              </button>
             </div>
           ) : (
             <div style={{ marginTop: 8 }}>

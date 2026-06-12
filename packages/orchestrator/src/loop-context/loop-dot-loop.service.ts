@@ -20,7 +20,9 @@ import { LoopProgressService } from '../chat/loop-progress.service.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
+import { GitContinueService } from '../git/git-continue.service.js';
 import { GitService } from '../git/git.service.js';
+import { isGitSyncConflictError } from '../git/git-sync-conflict.error.js';
 import { MergeRequestService } from '../git/merge-request.service.js';
 import { SecretManager } from '../git/secret-manager.js';
 import { ModelRouter } from '../model/model-router.js';
@@ -57,6 +59,7 @@ export class LoopDotLoopService {
     private readonly chatService: ChatService,
     private readonly progress: LoopProgressService,
     private readonly gitService: GitService,
+    private readonly gitContinue: GitContinueService,
     private readonly mergeRequestService: MergeRequestService,
     private readonly secretManager: SecretManager,
     private readonly modelRouter: ModelRouter,
@@ -145,6 +148,44 @@ export class LoopDotLoopService {
 
     void this.finalizeOnLoopComplete(loopId, requestedBy);
     return { started: true, message: '已开始重试 .loop 知识库同步' };
+  }
+
+  /** Git 冲突解决后：仅 push 并创建 .loop MR */
+  async continueAfterGitConflict(
+    loopId: string,
+    completedBy?: string,
+  ): Promise<void> {
+    if (!this.isEnabled()) return;
+
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop?.workspace_path) {
+      throw new BadRequestException('Loop 工作区不存在');
+    }
+
+    const project = await this.projectRepo.findById(loop.project_id);
+    const gitConfig = project?.git_config as { remoteUrl?: string } | undefined;
+    if (!gitConfig?.remoteUrl) {
+      throw new BadRequestException('未配置 Git 远程仓库');
+    }
+
+    this.chatService.emitProcessing({
+      loopId,
+      active: true,
+      label: '正在继续 .loop Git 同步…',
+    });
+
+    try {
+      await this.progress.publish({
+        loopId,
+        phase: 'done',
+        label: '正在推送到 Git…',
+        detail: `分支：\`${loop.git_branch ?? `loop/${loopId}`}\``,
+      });
+      await this.gitService.pushLoopBranch(loopId);
+      await this.createLoopDotMrAndNotify(loopId, loop, gitConfig, completedBy);
+    } finally {
+      this.chatService.emitProcessing({ loopId, active: false });
+    }
   }
 
   /** Loop 完成（线上验证通过）后：更新 .loop、提交、创建 MR */
@@ -263,70 +304,24 @@ export class LoopDotLoopService {
         loopId,
         `loop ${loopId}: update .loop project knowledge`,
       );
-      await this.gitService.pushLoopBranch(loopId);
+      try {
+        await this.gitService.pushLoopBranch(loopId);
+      } catch (err) {
+        if (isGitSyncConflictError(err)) {
+          await this.gitContinue.reportConflict(loopId, {
+            branch: err.branch,
+            detail: err.detail || err.message,
+            retry: { type: 'loop_dot_loop_push_mr', completedBy },
+            preferUserId: completedBy,
+          });
+          return;
+        }
+        throw err;
+      }
 
-      const members = await this.memberRepo.listByLoop(loopId);
-      const mergeAssignee = pickNotifyMember(members, {
-        preferUserId: completedBy,
-        skillsHint:
-          process.env.DEPLOY_MERGE_SKILLS ?? '运维 合并 MR 代码评审',
-      });
-
-      const headBranch = loop.git_branch ?? `loop/${loopId}`;
-      const baseBranch = testBranch();
-      const mrCredentialRef = this.secretManager.resolveMrApiCredentialRef(
-        gitConfig as { mrCredentialRef?: string },
-      );
-
-      await this.progress.publish({
-        loopId,
-        phase: 'done',
-        label: '正在创建 .loop 知识库合并 MR…',
-        detail: `\`${headBranch}\` → \`${baseBranch}\``,
-      });
-
-      const mr = await this.mergeRequestService.createOrGetMergeRequest({
-        remoteUrl: String(gitConfig.remoteUrl),
-        credentialRef: mrCredentialRef,
-        headBranch,
-        baseBranch,
-        title: `loop ${loopId}: update .loop knowledge`,
-        body: [
-          '## .loop 项目知识库更新',
-          '',
-          `- Loop：\`${loopId}\` — ${loop.title}`,
-          `- 已更新：\`${LOOP_DOT_README}\`、\`${LOOP_DOT_DESIGN}\`、\`${LOOP_DOT_HISTORY}\`、\`${LOOP_DOT_MEMORY}\``,
-          '',
-          '请在 Git 平台 Review 并合并，使后续 Loop 的 PM Agent 能读取最新项目上下文。',
-        ].join('\n'),
-      });
-
-      const mention = mergeAssignee
-        ? `@${mergeAssignee.userId}（${mergeAssignee.displayName}）`
-        : '相关同事';
-
-      await this.chatService.publishAgentMessage({
-        loopId,
-        phase: 'done',
-        agentId: 'orchestrator',
-        content: {
-          type: 'artifact',
-          body: [
-            '## .loop 项目知识库已更新',
-            '',
-            '本 Loop 线上验证已通过，已更新仓库中的项目知识库文件：',
-            '',
-            ...LOOP_DOT_FILES.map((f) => `- \`${f}\``),
-            '',
-            `- MR：[${mr.provider === 'gitlab' ? '!' : '#'}${mr.number}](${mr.url})`,
-            `- 分支：\`${headBranch}\` → \`${baseBranch}\``,
-            '',
-            `请 ${mention} **Review 并合并** 该 MR，以便下一个 Loop 的 PM Agent 读取最新 \`.loop\` 上下文。`,
-          ].join('\n'),
-          mentions: mergeAssignee ? failureMentions(mergeAssignee) : undefined,
-        },
-      });
+      await this.createLoopDotMrAndNotify(loopId, loop, gitConfig, completedBy);
     } catch (err) {
+      if (isGitSyncConflictError(err)) return;
       console.warn(`[loop-dot-loop] finalize failed for ${loopId}:`, err);
       const msg = err instanceof Error ? err.message : String(err);
       await this.chatService.publishAgentMessage({
@@ -342,5 +337,72 @@ export class LoopDotLoopService {
       this.syncing.delete(loopId);
       this.chatService.emitProcessing({ loopId, active: false });
     }
+  }
+
+  private async createLoopDotMrAndNotify(
+    loopId: string,
+    loop: NonNullable<Awaited<ReturnType<LoopRepository['findById']>>>,
+    gitConfig: { remoteUrl?: string; mrCredentialRef?: string },
+    completedBy?: string,
+  ): Promise<void> {
+    const members = await this.memberRepo.listByLoop(loopId);
+    const mergeAssignee = pickNotifyMember(members, {
+      preferUserId: completedBy,
+      skillsHint:
+        process.env.DEPLOY_MERGE_SKILLS ?? '运维 合并 MR 代码评审',
+    });
+
+    const headBranch = loop.git_branch ?? `loop/${loopId}`;
+    const baseBranch = testBranch();
+    const mrCredentialRef = this.secretManager.resolveMrApiCredentialRef(gitConfig);
+
+    await this.progress.publish({
+      loopId,
+      phase: 'done',
+      label: '正在创建 .loop 知识库合并 MR…',
+      detail: `\`${headBranch}\` → \`${baseBranch}\``,
+    });
+
+    const mr = await this.mergeRequestService.createOrGetMergeRequest({
+      remoteUrl: String(gitConfig.remoteUrl),
+      credentialRef: mrCredentialRef,
+      headBranch,
+      baseBranch,
+      title: `loop ${loopId}: update .loop knowledge`,
+      body: [
+        '## .loop 项目知识库更新',
+        '',
+        `- Loop：\`${loopId}\` — ${loop.title}`,
+        `- 已更新：\`${LOOP_DOT_README}\`、\`${LOOP_DOT_DESIGN}\`、\`${LOOP_DOT_HISTORY}\`、\`${LOOP_DOT_MEMORY}\``,
+        '',
+        '请在 Git 平台 Review 并合并，使后续 Loop 的 PM Agent 能读取最新项目上下文。',
+      ].join('\n'),
+    });
+
+    const mention = mergeAssignee
+      ? `@${mergeAssignee.userId}（${mergeAssignee.displayName}）`
+      : '相关同事';
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: 'done',
+      agentId: 'orchestrator',
+      content: {
+        type: 'artifact',
+        body: [
+          '## .loop 项目知识库已更新',
+          '',
+          '本 Loop 线上验证已通过，已更新仓库中的项目知识库文件：',
+          '',
+          ...LOOP_DOT_FILES.map((f) => `- \`${f}\``),
+          '',
+          `- MR：[${mr.provider === 'gitlab' ? '!' : '#'}${mr.number}](${mr.url})`,
+          `- 分支：\`${headBranch}\` → \`${baseBranch}\``,
+          '',
+          `请 ${mention} **Review 并合并** 该 MR，以便下一个 Loop 的 PM Agent 读取最新 \`.loop\` 上下文。`,
+        ].join('\n'),
+        mentions: mergeAssignee ? failureMentions(mergeAssignee) : undefined,
+      },
+    });
   }
 }
