@@ -21,7 +21,12 @@ export class OrchestratorClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body, userId, displayName, mentions }),
     });
-    if (!res.ok) throw new Error(`sendMessage failed: ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `sendMessage failed: ${res.status}${detail ? ` — ${detail}` : ''}`,
+      );
+    }
     return res.json();
   }
 

@@ -15,10 +15,10 @@ from app.schemas import (
     SendMessageRequest,
     SpawnWorkStreamRequest,
 )
-from app.services import LoopService, sse_stream
+from app.services import loop_service, sse_stream
 
 router = APIRouter(prefix="/api")
-service = LoopService()
+service = loop_service
 
 
 @router.get("/health")
@@ -108,7 +108,9 @@ async def send_message(loop_id: str, body: SendMessageRequest):
                 cur, loop_id, body.body, body.userId, body.displayName, body.mentions
             )
     except ValueError as e:
-        raise HTTPException(404, str(e)) from e
+        msg = str(e)
+        status = 404 if msg == "Loop not found" else 400
+        raise HTTPException(status, msg) from e
 
 
 @router.post("/loops/{loop_id}/actions")

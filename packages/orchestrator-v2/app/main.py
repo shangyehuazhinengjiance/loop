@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db import close_pool, init_pool, transaction
 from app.routers import router
-from app.services import LoopService
+from app.services import loop_service
 
 
 @asynccontextmanager
@@ -18,7 +18,7 @@ async def lifespan(_app: FastAPI):
     await migrate()
     await init_pool()
     async with transaction() as (_, cur):
-        await LoopService().ensure_templates(cur)
+        await loop_service.ensure_templates(cur)
     yield
     await close_pool()
 

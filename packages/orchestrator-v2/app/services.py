@@ -373,6 +373,9 @@ class LoopService:
             raise ValueError("Loop not found")
         tpl = self.templates.get(template_id)
         if not tpl:
+            await self.templates.refresh_cache(cur)
+            tpl = self.templates.get(template_id)
+        if not tpl:
             raise ValueError(f"Unknown template: {template_id}")
 
         instance_title = title or tpl["name"]
@@ -895,3 +898,7 @@ async def sse_stream(loop_id: str) -> AsyncIterator[str]:
             yield f"data: {data}\n\n"
     finally:
         event_bus.unsubscribe(loop_id, q)
+
+
+# 全进程单例：模板缓存在启动时加载，路由须复用同一实例
+loop_service = LoopService()
