@@ -4,6 +4,13 @@ import re
 from typing import Any
 
 
+# 群聊按钮 action → 子任务流模板（Human 确认后 complete 对应 Run）
+APPROVAL_ACTION_TEMPLATES: dict[str, str] = {
+    "approve_prd": "pm-prd",
+    "approve_dev": "dev-impl",
+    "approve_deploy": "ops-deploy-prod",
+}
+
 CHAT_INTENT_PATTERNS: dict[str, list[str]] = {
     "confirm_mr_merged": ["已合并", "mr merged", "合完了", "merge complete"],
     "approve_test": ["测试通过", "验收通过", "test passed"],

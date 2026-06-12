@@ -121,7 +121,9 @@ async def post_action(loop_id: str, body: ActionRequest):
                 cur, loop_id, body.action, body.userId, body.runId, body.note
             )
     except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+        msg = str(e)
+        status = 404 if msg == "Loop not found" else 400
+        raise HTTPException(status, msg) from e
 
 
 @router.get("/loops/{loop_id}/events")

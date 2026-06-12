@@ -12,6 +12,7 @@ const ORCHESTRATOR =
 
 interface Message {
   id: string;
+  runId?: string;
   sender: { type: string; id: string; displayName: string };
   content: {
     type: string;
@@ -20,6 +21,23 @@ interface Message {
     mentions?: string[];
   };
   createdAt: string;
+}
+
+const AGENT_LABELS: Record<string, string> = {
+  'pm-agent': 'PM Agent',
+  'dev-agent': 'Dev Agent',
+  'ops-agent': 'Ops Agent',
+};
+
+function processingLabelFromEvent(data: {
+  active?: boolean;
+  label?: string;
+  agent?: string;
+}): string | null {
+  if (!data.active) return null;
+  if (data.label) return data.label;
+  const name = data.agent ? (AGENT_LABELS[data.agent] ?? data.agent) : 'Agent';
+  return `${name} 处理中…`;
 }
 
 function toChatModel(m: Message, index: number): ChatMessageModel {
@@ -37,8 +55,10 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
   const [body, setBody] = useState('');
   const [connected, setConnected] = useState(false);
   const [loopTitle, setLoopTitle] = useState('');
-  const [processing, setProcessing] = useState(false);
+  const [processingLabel, setProcessingLabel] = useState<string | null>(null);
   const [sendError, setSendError] = useState('');
+  const [boardTick, setBoardTick] = useState(0);
+  const [actionPending, setActionPending] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const userId = 'user-local';
   const displayName = '本地用户';
@@ -77,7 +97,7 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
         const data = JSON.parse(ev.data as string) as
           | { type: 'history'; messages: Message[] }
           | { type: 'message'; message: Message }
-          | { type: 'processing'; active?: boolean }
+          | { type: 'processing'; active?: boolean; label?: string; agent?: string }
           | { type: 'error'; message: string };
         if (data.type === 'history') {
           setMessages(data.messages);
@@ -86,7 +106,7 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
           appendMessage(data.message);
         }
         if (data.type === 'processing') {
-          setProcessing(Boolean(data.active));
+          setProcessingLabel(processingLabelFromEvent(data));
         }
         if (data.type === 'error') {
           setSendError(data.message);
@@ -113,11 +133,26 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
   };
 
   const postAction = async (action: string, runId?: string) => {
-    await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/actions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, runId, userId, displayName }),
-    });
+    const key = `${action}:${runId ?? ''}`;
+    setActionPending(key);
+    setSendError('');
+    try {
+      const res = await fetch(`${ORCHESTRATOR}/api/loops/${loopId}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, runId, userId, displayName }),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      setProcessingLabel(null);
+      setBoardTick((t) => t + 1);
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setActionPending(null);
+    }
   };
 
   const chatModels = messages.map(toChatModel);
@@ -133,10 +168,17 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
 
       <div className="v2-main-grid">
         <div className="v2-main-col">
-          <WorkStreamBoard loopId={loopId} />
-          {processing && <p className="v2-processing">Agent 处理中…</p>}
+          <WorkStreamBoard loopId={loopId} refreshTick={boardTick} />
           <section className="v2-chat">
-            <h2>群聊</h2>
+            <div className="v2-chat-header">
+              <h2>群聊</h2>
+              {processingLabel && (
+                <div className="v2-agent-processing" role="status" aria-live="polite">
+                  <span className="v2-agent-processing-spinner" aria-hidden />
+                  <span>{processingLabel}</span>
+                </div>
+              )}
+            </div>
             <div className="v2-messages chat-msg-list">
               {chatModels.map((m, i) => (
                 <ChatMessageBubble
@@ -150,16 +192,22 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
                     m.content.actions?.length
                       ? () => (
                           <>
-                            {m.content.actions!.map((a) => (
-                              <button
-                                key={a.id}
-                                type="button"
-                                className="v2-action-btn"
-                                onClick={() => postAction(a.action, a.runId)}
-                              >
-                                {a.label}
-                              </button>
-                            ))}
+                            {m.content.actions!.map((a) => {
+                              const runId = a.runId ?? messages[i]?.runId;
+                              const pending =
+                                actionPending === `${a.action}:${runId ?? ''}`;
+                              return (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  className="v2-action-btn"
+                                  disabled={pending || Boolean(actionPending)}
+                                  onClick={() => postAction(a.action, runId)}
+                                >
+                                  {pending ? '处理中…' : a.label}
+                                </button>
+                              );
+                            })}
                           </>
                         )
                       : undefined

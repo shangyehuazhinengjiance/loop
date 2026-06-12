@@ -611,10 +611,51 @@ button {
   color: #e6edf3;
 }
 
-.v2-processing {
-  color: #d29922;
+.v2-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.v2-chat-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.v2-agent-processing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #132339 0%, #161b22 100%);
+  border: 1px solid rgba(56, 139, 253, 0.4);
   font-size: 13px;
-  margin: 8px 0;
+  color: #79c0ff;
+  box-shadow: 0 0 16px rgba(56, 139, 253, 0.15);
+  animation: v2-processing-pulse 2s ease-in-out infinite;
+}
+
+.v2-agent-processing-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(56, 139, 253, 0.25);
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: loop-spin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes loop-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes v2-processing-pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(56, 139, 253, 0.12); }
+  50% { box-shadow: 0 0 20px rgba(56, 139, 253, 0.28); }
 }
 
 .v2-action-btn {

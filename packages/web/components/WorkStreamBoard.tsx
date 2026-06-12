@@ -37,7 +37,13 @@ const COLUMN_LABELS: Record<string, string> = {
   other: '其他',
 };
 
-export function WorkStreamBoard({ loopId }: { loopId: string }) {
+export function WorkStreamBoard({
+  loopId,
+  refreshTick = 0,
+}: {
+  loopId: string;
+  refreshTick?: number;
+}) {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [templates, setTemplates] = useState<{ id: string; name: string }[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('');
@@ -66,6 +72,10 @@ export function WorkStreamBoard({ loopId }: { loopId: string }) {
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load]);
+
+  useEffect(() => {
+    if (refreshTick > 0) void load();
+  }, [refreshTick, load]);
 
   const addStream = async () => {
     if (!selectedTemplate) return;

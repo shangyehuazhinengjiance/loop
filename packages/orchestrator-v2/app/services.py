@@ -11,7 +11,11 @@ from app.agent_dispatcher import agent_dispatcher
 from app.config import get_settings
 from app.dependency_resolver import DependencyResolver
 from app.git_service import GitService
-from app.human_end import build_confirmation_actions, match_chat_intent
+from app.human_end import (
+    APPROVAL_ACTION_TEMPLATES,
+    build_confirmation_actions,
+    match_chat_intent,
+)
 from app.repositories import (
     LoopRepository,
     MemberRepository,
@@ -807,6 +811,14 @@ class LoopService:
         run_id: str | None = None,
         phase: str | None = None,
     ) -> MessageResponse:
+        if run_id and content.get("actions"):
+            content = {
+                **content,
+                "actions": [
+                    {**action, "runId": action.get("runId") or run_id}
+                    for action in content["actions"]
+                ],
+            }
         row = await self.messages.create(
             cur, loop_id, "agent", agent_id, content, run_id=run_id
         )
@@ -844,6 +856,23 @@ class LoopService:
         members = await self._member_map(cur, loop_id)
         return [self._message_row(r, members) for r in rows]
 
+    async def _find_run_for_template(
+        self, cur: Any, loop_id: str, template_id: str
+    ) -> str | None:
+        instances = await self.workstreams.list_instances(cur, loop_id)
+        for inst in instances:
+            if inst["template_id"] != template_id:
+                continue
+            latest = await self.workstreams.latest_run_for_instance(cur, inst["id"])
+            if latest and latest["status"] in (
+                "active",
+                "ready",
+                "completing",
+                "blocked",
+            ):
+                return latest["id"]
+        return None
+
     async def handle_action(
         self,
         cur: Any,
@@ -856,12 +885,25 @@ class LoopService:
         if action == "dismiss_confirm":
             return {"ok": True, "dismissed": True}
 
+        if not run_id and action in APPROVAL_ACTION_TEMPLATES:
+            run_id = await self._find_run_for_template(
+                cur, loop_id, APPROVAL_ACTION_TEMPLATES[action]
+            )
+            if not run_id:
+                tpl_name = APPROVAL_ACTION_TEMPLATES[action]
+                raise ValueError(f"未找到进行中的「{tpl_name}」子任务流，无法确认")
+
         if run_id:
             run = await self.complete_run(cur, loop_id, run_id)
+            label = {
+                "approve_prd": "PRD 已确认",
+                "approve_dev": "开发验收已通过",
+                "approve_deploy": "部署已确认",
+            }.get(action, f"子任务流已完成（{action}）")
             await self.publish_system_message(
                 cur,
                 loop_id,
-                f"子任务流已完成：{run.templateName or run.templateId}（动作：{action}）",
+                f"{label}：{run.templateName or run.templateId} · Run v{run.version}",
                 extra={"event": "done", "action": action, "runId": run_id},
                 run_id=run_id,
             )
