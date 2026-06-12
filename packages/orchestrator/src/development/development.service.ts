@@ -352,15 +352,15 @@ export class DevelopmentService {
       'approve_dev',
       loop.phase,
     );
-    if (exists) return;
-
-    await this.approvalRepo.create({
-      loopId: input.loopId,
-      action: 'approve_dev',
-      approvedBy: input.userId,
-      phase: loop.phase,
-      note: input.note,
-    });
+    if (!exists) {
+      await this.approvalRepo.create({
+        loopId: input.loopId,
+        action: 'approve_dev',
+        approvedBy: input.userId,
+        phase: loop.phase,
+        note: input.note,
+      });
+    }
     await this.phaseService.approve(
       input.loopId,
       'approve_dev',

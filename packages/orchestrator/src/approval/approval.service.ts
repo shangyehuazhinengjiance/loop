@@ -74,6 +74,36 @@ export class ApprovalService {
       );
     }
 
+    if (input.action === 'confirm_prd_revision') {
+      const exists = await this.approvalRepo.hasApprovalInPhase(
+        input.loopId,
+        input.action,
+        loop.phase,
+      );
+      if (!exists) {
+        await this.approvalRepo.create({
+          loopId: input.loopId,
+          action: input.action,
+          approvedBy: input.approvedBy,
+          phase: loop.phase,
+          note: input.note,
+        });
+        await this.phaseService.confirmPrdRevision(
+          input.loopId,
+          input.approvedBy,
+          input.note,
+        );
+      } else {
+        await this.resumeDevAfterPrdRevision(input.loopId, input.approvedBy);
+      }
+      return {
+        duplicate: exists,
+        retried: exists,
+        action: input.action,
+        phase: loop.phase,
+      };
+    }
+
     const exists = await this.approvalRepo.hasApprovalInPhase(
       input.loopId,
       input.action,
@@ -111,23 +141,6 @@ export class ApprovalService {
     }
     if (exists && input.action !== 'approve_test') {
       return { duplicate: true, action: input.action, phase: loop.phase };
-    }
-
-    if (input.action === 'confirm_prd_revision') {
-      await this.approvalRepo.create({
-        loopId: input.loopId,
-        action: input.action,
-        approvedBy: input.approvedBy,
-        phase: loop.phase,
-        note: input.note,
-      });
-      await this.phaseService.confirmPrdRevision(
-        input.loopId,
-        input.approvedBy,
-        input.note,
-      );
-      await this.resumeDevAfterPrdRevision(input.loopId, input.approvedBy);
-      return { duplicate: false, action: input.action, phase: loop.phase };
     }
 
     if (input.action === 'confirm_mr_merged') {

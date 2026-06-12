@@ -684,7 +684,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       };
       if (data.duplicate && !data.retried && !data.event) {
         alert(
-          '该阶段此前已审批过，流程未前进。若刚从后期回退，请部署最新 orchestrator 后重试，或再次执行回退以清除审批记录。',
+          '该阶段此前已审批过，流程未前进。请部署最新 orchestrator 后重试；若刚从后期回退，可再次执行回退以清除审批记录，或点击「恢复流程」。',
         );
       }
       await refreshLoop();
