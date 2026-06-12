@@ -1,4 +1,5 @@
 import type { ArtifactRecord, ArtifactType, Phase } from '@loop/shared';
+import { toIso8601Utc } from '../datetime.js';
 import { dbQuery, dbQueryOne, insertReturning, parseJsonField } from '../query.js';
 import type { DbPool } from '../pool.js';
 import { getPool } from '../pool.js';
@@ -104,7 +105,7 @@ export class ArtifactRepository {
       content: row.content,
       diffFrom: row.diff_from ?? undefined,
       createdBy: row.created_by,
-      createdAt: row.created_at.toISOString(),
+      createdAt: toIso8601Utc(row.created_at),
     };
   }
 }

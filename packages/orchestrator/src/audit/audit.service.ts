@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { toIso8601Utc } from '../db/datetime.js';
 import { AuditRepository } from '../db/repositories/audit.repository.js';
 import { ChatService } from '../chat/chat.service.js';
 import type { Phase } from '@loop/shared';
@@ -43,7 +44,7 @@ export class AuditService {
       agent: r.agent ?? undefined,
       action: r.action,
       detail: r.detail,
-      createdAt: r.created_at.toISOString(),
+      createdAt: toIso8601Utc(r.created_at),
     }));
   }
 }

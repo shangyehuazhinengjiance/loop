@@ -9,6 +9,8 @@ data:
   # 集群内 Service 地址，Agent 回调用
   ORCHESTRATOR_URL: "http://loop-orchestrator:3000"
   WORKSPACE_ROOT: "/data/workspaces"
+  # MySQL DATETIME 解读时区（与数据库写入时区一致，默认东八区）
+  DB_TIMEZONE: "+08:00"
 
   # 默认 Git 仓库（Web 创建 Project 时自动用于 clone，Dev Agent 工作区）
   GIT_DEFAULT_REMOTE_URL: "git@github.com:shangyehuazhinengjiance/loop.git"

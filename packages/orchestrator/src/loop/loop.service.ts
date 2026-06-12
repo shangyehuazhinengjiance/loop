@@ -1,4 +1,4 @@
-import type { LoopContext, ProjectModelConfig } from '@loop/shared';
+import type { AgentRole, LoopContext, Phase, ProjectModelConfig } from '@loop/shared';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { join } from 'node:path';
 import type { LoopRow } from '../db/repositories/loop.repository.js';
@@ -13,6 +13,7 @@ import { WorkspaceJobService } from '../workspace/workspace-job.service.js';
 import { LoopMemberService } from '../member/loop-member.service.js';
 import { InputRequirementsService } from '../requirements/input-requirements.service.js';
 import { LoopProgressService } from '../chat/loop-progress.service.js';
+import { serializeLoopRow, serializeProjectRow } from './loop-api.serializer.js';
 
 @Injectable()
 export class LoopService {
@@ -242,14 +243,86 @@ export class LoopService {
     for (const mention of mentions) {
       const agent = this.parseMention(mention);
       if (agent) {
-        await this.agentCoordinator.activate(input.loopId, agent, {
-          reason: 'mention',
+        const currentLoop =
+          (await this.loopRepo.findById(input.loopId)) ?? loop;
+        await this.routeAgentMention({
+          loopId: input.loopId,
+          phase: currentLoop.phase,
+          agent,
           userId: input.userId,
         });
       }
     }
 
     return message;
+  }
+
+  /** 跨阶段 @mention 路由：development 中 @pm 时挂起 Dev 再激活 PM */
+  private async routeAgentMention(input: {
+    loopId: string;
+    phase: Phase;
+    agent: AgentRole;
+    userId: string;
+  }): Promise<void> {
+    const { loopId, phase, agent, userId } = input;
+
+    const loop = await this.loopRepo.findById(loopId);
+
+    if (phase === 'development' && agent === 'pm' && loop) {
+      const devStatus = this.agentCoordinator.getStatus(loopId, 'dev');
+      const externalDev =
+        loop.context.development?.mode === 'external' &&
+        loop.context.development.external;
+
+      if (devStatus === 'active') {
+        await this.agentCoordinator.suspend(loopId, 'dev', 'mention_handoff');
+        await this.persistAgentRouting(loopId, 'dev', userId);
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: 'Dev Agent 已挂起，PM Agent 介入处理需求变更…',
+          },
+        });
+      } else if (externalDev && loop.status === 'blocked') {
+        await this.loopRepo.updateBlocker(loopId, null, 'active');
+        await this.persistAgentRouting(loopId, 'dev', userId);
+        await this.chatService.publishAgentMessage({
+          loopId,
+          phase: loop.phase,
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: '外部工具开发已暂停，PM Agent 介入处理需求变更…',
+          },
+        });
+      }
+    }
+
+    await this.agentCoordinator.activate(loopId, agent, {
+      reason: 'mention',
+      userId,
+    });
+  }
+
+  private async persistAgentRouting(
+    loopId: string,
+    suspendedAgent: AgentRole,
+    userId: string,
+  ): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) return;
+
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      agentRouting: {
+        suspendedAgent,
+        suspendedAt: new Date().toISOString(),
+        suspendedBy: userId,
+      },
+    });
   }
 
   async updateContext(loopId: string, context: LoopContext): Promise<LoopRow> {
@@ -299,14 +372,17 @@ export class LoopService {
         id: project.id,
         name: project.name,
         gitConfig: project.git_config,
-        createdAt: project.created_at,
-        loops: (await this.loopRepo.listByProject(project.id)).map((loop) => ({
-          id: loop.id,
-          title: loop.title,
-          phase: loop.phase,
-          status: loop.status,
-          updatedAt: loop.updated_at,
-        })),
+        createdAt: serializeProjectRow(project).createdAt,
+        loops: (await this.loopRepo.listByProject(project.id)).map((loop) => {
+          const row = serializeLoopRow(loop);
+          return {
+            id: loop.id,
+            title: loop.title,
+            phase: loop.phase,
+            status: loop.status,
+            updatedAt: row.updatedAt,
+          };
+        }),
       })),
     );
   }

@@ -20,6 +20,7 @@ const ORCHESTRATOR =
 
 const ACTION_REQUIRED_PHASE: Record<string, string> = {
   approve_prd: 'requirement',
+  confirm_prd_revision: 'development',
   approve_dev: 'development',
   confirm_mr_merged: 'deployment',
   confirm_master_mr_merged: 'deployment',
@@ -30,6 +31,7 @@ const ACTION_REQUIRED_PHASE: Record<string, string> = {
 
 const APPROVE_PENDING_LABEL: Record<string, string> = {
   approve_prd: '正在确认 PRD…',
+  confirm_prd_revision: '正在确认 PRD 修订…',
   approve_dev: '正在提交开发验收…',
   confirm_mr_merged: '正在确认 MR 合并…',
   confirm_master_mr_merged: '正在确认上线 MR 合并…',
@@ -138,6 +140,8 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   const [externalAssigneeId, setExternalAssigneeId] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** Agent 后台处理时不阻塞输入，便于 @pm-agent 等介入 */
+  const inputBusy = Boolean(clientPending || sending);
   const busy = Boolean(clientPending || sending || agentProcessing);
   const statusLabel =
     clientPending ?? (sending ? '正在发送消息…' : null) ?? agentProcessing;
@@ -270,7 +274,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
   }, [messages]);
 
   function send() {
-    if (!input.trim() || !wsRef.current || !user || busy) return;
+    if (!input.trim() || !wsRef.current || !user || inputBusy) return;
     setSending(true);
     wsRef.current.send(
       JSON.stringify({
@@ -480,7 +484,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
       return isLatestTestApprovalMessage(message);
     }
     if (!isActionAvailable(action)) return false;
-    if (action === 'approve_prd') {
+    if (action === 'approve_prd' || action === 'confirm_prd_revision') {
       return message.content.type === 'artifact';
     }
     if (action === 'approve_deploy') {
@@ -876,7 +880,7 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           </div>
           <div className="chat-loop-header__meta">
             {loopCreatedAt ? (
-              <span>创建于 {formatLoopCreatedAt(loopCreatedAt)}（UTC+8）</span>
+              <span>创建于 {formatLoopCreatedAt(loopCreatedAt)}（本地时间）</span>
             ) : (
               <span style={{ color: '#6e7681' }}>{loopId.slice(0, 8)}…</span>
             )}
@@ -1489,20 +1493,20 @@ export function ChatRoom({ loopId }: { loopId: string }) {
           value={input}
           onChange={setInput}
           onSend={send}
-          disabled={!connected || busy}
+          disabled={!connected || inputBusy}
           humanMentions={humanMentions}
         />
         <button
           onClick={send}
-          disabled={!connected || busy || !input.trim()}
+          disabled={!connected || inputBusy || !input.trim()}
           style={{
             padding: '10px 20px',
             borderRadius: 8,
             border: 'none',
             background: '#238636',
             color: '#fff',
-            opacity: !connected || busy || !input.trim() ? 0.6 : 1,
-            cursor: !connected || busy || !input.trim() ? 'not-allowed' : 'pointer',
+            opacity: !connected || inputBusy || !input.trim() ? 0.6 : 1,
+            cursor: !connected || inputBusy || !input.trim() ? 'not-allowed' : 'pointer',
           }}
         >
           {sending ? '发送中…' : '发送'}

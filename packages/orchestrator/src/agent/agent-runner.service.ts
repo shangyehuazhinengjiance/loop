@@ -28,6 +28,8 @@ import type { ProjectRow } from '../db/repositories/project.repository.js';
 export class AgentRunnerService implements OnModuleInit {
   private readonly running = new Set<string>();
   private readonly abortControllers = new Map<string, AbortController>();
+  /** 因挂起而中止的 Agent run，不发送失败通知 */
+  private readonly suspendedRuns = new Set<string>();
 
   constructor(
     private readonly coordinator: AgentCoordinator,
@@ -57,6 +59,15 @@ export class AgentRunnerService implements OnModuleInit {
       const key = `${event.loopId}:${event.agent}`;
       this.abortControllers.get(key)?.abort();
     });
+
+    this.coordinator.on(
+      'agent:suspend',
+      (event: { loopId: string; agent: AgentRole }) => {
+        const key = `${event.loopId}:${event.agent}`;
+        this.suspendedRuns.add(key);
+        this.abortControllers.get(key)?.abort();
+      },
+    );
   }
 
   private async handleActivate(event: AgentActivateEvent): Promise<void> {
@@ -81,10 +92,27 @@ export class AgentRunnerService implements OnModuleInit {
 
     try {
       const loop = await this.loopRepo.findById(event.loopId);
-      if (loop?.status === 'blocked' && event.reason !== 'manual') {
+      const allowedWhileBlocked =
+        event.reason === 'manual' ||
+        event.reason === 'mention' ||
+        event.reason === 'resume';
+      if (loop?.status === 'blocked' && !allowedWhileBlocked) {
         console.info(`[agent-runner] skip ${key}: loop is blocked`);
         return;
       }
+
+      if (event.reason === 'resume' && event.agent === 'dev') {
+        await this.chatService.publishAgentMessage({
+          loopId: event.loopId,
+          phase: loop?.phase ?? 'development',
+          agentId: 'orchestrator',
+          content: {
+            type: 'text',
+            body: 'Dev Agent 已恢复，将基于最新 PRD 继续开发…',
+          },
+        });
+      }
+
       await this.runAgent(
         event.loopId,
         event.agent,
@@ -94,6 +122,10 @@ export class AgentRunnerService implements OnModuleInit {
       );
     } catch (err) {
       if (abort.signal.aborted) {
+        if (this.suspendedRuns.delete(key)) {
+          console.info(`[agent-runner] ${key} suspended`);
+          return;
+        }
         const reason =
           err instanceof Error && err.message
             ? err.message

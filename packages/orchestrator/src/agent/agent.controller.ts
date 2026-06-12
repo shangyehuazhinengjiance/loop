@@ -24,6 +24,24 @@ export class AgentController {
     return { status: 'cancelled', agent };
   }
 
+  @Post(':agent/suspend')
+  async suspend(
+    @Param('loopId') loopId: string,
+    @Param('agent') agent: AgentRole,
+  ) {
+    await this.coordinator.suspend(loopId, agent, 'manual');
+    return { status: 'suspended', agent };
+  }
+
+  @Post(':agent/resume')
+  async resume(
+    @Param('loopId') loopId: string,
+    @Param('agent') agent: AgentRole,
+  ) {
+    await this.coordinator.resume(loopId, agent);
+    return { status: 'resumed', agent };
+  }
+
   @Get(':agent/status')
   status(
     @Param('loopId') loopId: string,

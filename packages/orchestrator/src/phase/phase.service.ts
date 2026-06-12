@@ -146,6 +146,43 @@ export class PhaseService {
     return event;
   }
 
+  /** development 阶段 PRD 增量修订确认：打快照但不改变 phase */
+  async confirmPrdRevision(
+    loopId: string,
+    approvedBy: string,
+    note?: string,
+  ): Promise<void> {
+    const loop = await this.requireLoop(loopId);
+    if (loop.phase !== 'development') {
+      throw new BadRequestException(
+        'confirm_prd_revision requires development phase',
+      );
+    }
+
+    const snapshot = await this.createSnapshotForApproval(
+      loop,
+      'confirm_prd_revision',
+      approvedBy,
+    );
+
+    await this.chatService.publishAgentMessage({
+      loopId,
+      phase: loop.phase,
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: `PRD 修订已确认（by ${approvedBy}${note ? `：${note}` : ''}），将恢复开发流程。`,
+      },
+    });
+
+    await this.auditService.log({
+      loopId,
+      action: 'approval:confirm_prd_revision',
+      detail: { approvedBy, note, snapshotId: snapshot?.id },
+      phase: loop.phase,
+    });
+  }
+
   async rollback(
     loopId: string,
     targetPhase: Phase,
@@ -291,6 +328,7 @@ export class PhaseService {
   ) {
     const labels: Partial<Record<ApprovalActionType, string>> = {
       approve_prd: 'PRD 确认',
+      confirm_prd_revision: 'PRD 修订确认',
       approve_dev: '开发验收',
       approve_deploy: '流水线完成',
     };

@@ -1,13 +1,6 @@
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
-const TZ_SHANGHAI = 'Asia/Shanghai';
 
-export function parseMessageTime(iso?: string): Date | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-type ShanghaiParts = {
+type TimeParts = {
   year: number;
   month: number;
   day: number;
@@ -16,9 +9,20 @@ type ShanghaiParts = {
   second: number;
 };
 
-function shanghaiParts(d: Date): ShanghaiParts {
+/** 将后端 UTC ISO（或 MySQL 风格字符串）解析为 Date */
+export function parseMessageTime(iso?: string): Date | null {
+  if (!iso) return null;
+  const raw = iso.trim();
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(normalized);
+  const withTz = hasTz ? normalized : `${normalized}Z`;
+  const d = new Date(withTz);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function partsInZone(d: Date, timeZone?: string): TimeParts {
   const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ_SHANGHAI,
+    ...(timeZone ? { timeZone } : {}),
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -27,9 +31,9 @@ function shanghaiParts(d: Date): ShanghaiParts {
     second: '2-digit',
     hour12: false,
   });
-  const parts = fmt.formatToParts(d);
+  const segments = fmt.formatToParts(d);
   const get = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((p) => p.type === type)?.value ?? 0);
+    Number(segments.find((p) => p.type === type)?.value ?? 0);
   return {
     year: get('year'),
     month: get('month'),
@@ -44,29 +48,28 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-function dayKey(p: ShanghaiParts): string {
+function dayKey(p: TimeParts): string {
   return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
 }
 
-function nowShanghaiParts(): ShanghaiParts {
-  return shanghaiParts(new Date());
-}
-
-/** 顶部 Loop 创建时间：YYYY-MM-DD HH:mm:ss（东八区） */
-export function formatLoopCreatedAt(iso?: string): string {
+/** Loop 创建时间：YYYY-MM-DD HH:mm:ss（设备本地时区） */
+export function formatLoopCreatedAt(
+  iso?: string,
+  timeZone?: string,
+): string {
   const d = parseMessageTime(iso);
   if (!d) return '';
-  const p = shanghaiParts(d);
+  const p = partsInZone(d, timeZone);
   return `${p.year}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
 }
 
-/** 消息列表时间分隔（东八区） */
-export function formatChatTimestamp(iso?: string): string {
+/** 消息列表时间分隔（设备本地时区） */
+export function formatChatTimestamp(iso?: string, timeZone?: string): string {
   const d = parseMessageTime(iso);
   if (!d) return '';
 
-  const p = shanghaiParts(d);
-  const n = nowShanghaiParts();
+  const p = partsInZone(d, timeZone);
+  const n = partsInZone(new Date(), timeZone);
   const time = `${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
 
   const msgDay = Date.UTC(p.year, p.month - 1, p.day);
@@ -81,13 +84,13 @@ export function formatChatTimestamp(iso?: string): string {
   return `${p.year}年${p.month}月${p.day}日 ${time}`;
 }
 
-/** 气泡/日志行时间（东八区，含秒避免同一分钟多条消息看起来时间相同） */
-export function formatBubbleTimestamp(iso?: string): string {
+/** 气泡/日志行时间（设备本地时区，含秒） */
+export function formatBubbleTimestamp(iso?: string, timeZone?: string): string {
   const d = parseMessageTime(iso);
   if (!d) return '';
 
-  const p = shanghaiParts(d);
-  const n = nowShanghaiParts();
+  const p = partsInZone(d, timeZone);
+  const n = partsInZone(new Date(), timeZone);
   const time = `${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
 
   if (dayKey(p) === dayKey(n)) return time;

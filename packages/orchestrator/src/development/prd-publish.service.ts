@@ -45,6 +45,22 @@ function buildHandoffMd(input: {
   ].join('\n');
 }
 
+export interface PrdPublishResult {
+  commitSha: string;
+  branch: string;
+  remoteUrl?: string;
+  pushStatus: 'ok' | 'skipped' | 'failed';
+  pushError?: string;
+}
+
+function formatGitError(err: unknown): string {
+  if (err && typeof err === 'object' && 'stderr' in err) {
+    const stderr = String((err as { stderr?: string }).stderr ?? '').trim();
+    if (stderr) return stderr.split('\n').slice(-4).join('\n');
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 @Injectable()
 export class PrdPublishService {
   constructor(
@@ -57,7 +73,7 @@ export class PrdPublishService {
     loopId: string;
     assigneeUserId: string;
     assigneeDisplayName: string;
-  }): Promise<{ commitSha: string; branch: string; remoteUrl?: string }> {
+  }): Promise<PrdPublishResult> {
     const loop = await this.loopRepo.findById(input.loopId);
     if (!loop?.workspace_path) {
       throw new Error('工作区未初始化，无法发布 PRD');
@@ -99,8 +115,22 @@ export class PrdPublishService {
       `loop ${input.loopId}: publish PRD for external development`,
     );
 
+    let pushStatus: PrdPublishResult['pushStatus'] = gitConfig?.remoteUrl
+      ? 'ok'
+      : 'skipped';
+    let pushError: string | undefined;
+
     if (gitConfig?.remoteUrl) {
-      await this.gitService.pushLoopBranch(input.loopId);
+      try {
+        await this.gitService.pushLoopBranch(input.loopId);
+      } catch (err) {
+        pushStatus = 'failed';
+        pushError = formatGitError(err);
+        console.warn(
+          `[prd-publish] push failed loop=${input.loopId} branch=${branch}:`,
+          pushError,
+        );
+      }
     }
 
     const ctx: LoopContext = {
@@ -109,6 +139,12 @@ export class PrdPublishService {
     };
     await this.loopRepo.updateContext(input.loopId, ctx);
 
-    return { commitSha, branch, remoteUrl: gitConfig?.remoteUrl };
+    return {
+      commitSha,
+      branch,
+      remoteUrl: gitConfig?.remoteUrl,
+      pushStatus,
+      pushError,
+    };
   }
 }

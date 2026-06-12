@@ -1,9 +1,9 @@
 import {
-  failureMentions,
   suggestAssignee,
   type DevelopmentConfig,
   type DevelopmentMode,
   type LoopContext,
+  type LoopMember,
 } from '@loop/shared';
 import {
   BadRequestException,
@@ -17,7 +17,7 @@ import { LoopMemberRepository } from '../db/repositories/loop-member.repository.
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ChatService } from '../chat/chat.service.js';
 import { PhaseService } from '../phase/phase.service.js';
-import { PrdPublishService } from './prd-publish.service.js';
+import { PrdPublishService, type PrdPublishResult } from './prd-publish.service.js';
 
 @Injectable()
 export class DevelopmentService {
@@ -187,7 +187,6 @@ export class DevelopmentService {
         assigneeDisplayName: assignee.displayName,
       });
 
-      const branch = published.branch;
       const now = new Date().toISOString();
       const development: DevelopmentConfig = {
         prdApprovedBy,
@@ -198,61 +197,215 @@ export class DevelopmentService {
           prdCommitSha: published.commitSha,
           prdPushedAt: now,
           handoffAt: now,
-          targetBranch: branch,
+          targetBranch: published.branch,
         },
       };
 
-      await this.loopRepo.updateContext(loopId, {
-        ...loop.context,
-        development,
-      });
-
-      const blocker = {
-        kind: 'external' as const,
-        phase: 'development' as const,
-        reason: `等待 @${assignee.displayName} 在外部工具完成开发（分支 \`${branch}\`）`,
-        assigneeUserId: assignee.userId,
-        assigneeDisplayName: assignee.displayName,
-        requestedBy: 'orchestrator' as const,
-        createdAt: now,
-      };
-      await this.loopRepo.updateBlocker(loopId, blocker, 'blocked');
-
-      const repoLine = published.remoteUrl
-        ? `- 仓库：\`${published.remoteUrl}\``
-        : '- 仓库：未配置远程（请在工作区本地开发）';
-
-      await this.chatService.publishAgentMessage({
+      await this.finalizeExternalDevHandoff({
         loopId,
-        phase: 'development',
-        agentId: 'orchestrator',
-        content: {
-          type: 'artifact',
-          body: [
-            '## 开发交接（外部工具）',
-            '',
-            repoLine,
-            `- 分支：\`${branch}\``,
-            `- PRD 路径：\`docs/loop/${loopId}/PRD.md\``,
-            `- 提交：\`${published.commitSha.slice(0, 8)}\``,
-            '',
-            `请 @${assignee.userId}（${assignee.displayName}）使用外部工具完成开发，**push 到 \`${branch}\`** 后点击下方按钮。`,
-            '',
-            '> 仅被指派的负责人可确认「开发完成」。',
-          ].join('\n'),
-          mentions: failureMentions(assignee),
-          actions: [
-            {
-              id: 'complete-external-dev',
-              label: '开发完成，进入部署',
-              action: 'complete_external_dev',
-            },
-          ],
-        },
+        assignee,
+        published,
+        development,
+        preamble: undefined,
       });
     } finally {
       this.chatService.emitProcessing({ loopId, active: false });
     }
+  }
+
+  /** PRD 修订确认后：重新发布 PRD 并下发带按钮的外部开发交接卡 */
+  async resumeExternalDevAfterPrdRevision(loopId: string): Promise<void> {
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop || loop.phase !== 'development') return;
+
+    const dev = loop.context.development;
+    const external = dev?.external;
+    if (dev?.mode !== 'external' || !external) return;
+
+    const assignee = await this.memberRepo.find(loopId, external.assigneeUserId);
+    if (!assignee) return;
+
+    this.chatService.emitProcessing({
+      loopId,
+      active: true,
+      label: '正在发布修订后的 PRD…',
+    });
+
+    try {
+      const published = await this.prdPublish.publishForExternalDev({
+        loopId,
+        assigneeUserId: external.assigneeUserId,
+        assigneeDisplayName: external.assigneeDisplayName,
+      });
+      const now = new Date().toISOString();
+
+      const development: DevelopmentConfig = {
+        ...dev,
+        external: {
+          ...external,
+          prdCommitSha: published.commitSha,
+          prdPushedAt: now,
+        },
+      };
+
+      await this.finalizeExternalDevHandoff({
+        loopId,
+        assignee,
+        published,
+        development,
+        preamble: '> PRD 已修订确认，请基于最新 PRD 继续开发。\n',
+      });
+    } finally {
+      this.chatService.emitProcessing({ loopId, active: false });
+    }
+  }
+
+  private async finalizeExternalDevHandoff(input: {
+    loopId: string;
+    assignee: LoopMember;
+    published: PrdPublishResult;
+    development: DevelopmentConfig;
+    preamble?: string;
+  }): Promise<void> {
+    const { loopId, assignee, published, development } = input;
+    const loop = await this.loopRepo.findById(loopId);
+    if (!loop) return;
+
+    await this.loopRepo.updateContext(loopId, {
+      ...loop.context,
+      development,
+    });
+
+    const now = new Date().toISOString();
+    let preamble = input.preamble ?? '';
+
+    if (published.pushStatus === 'failed') {
+      await this.notifyGitPushFailure({
+        loopId,
+        assignee,
+        published,
+      });
+      preamble +=
+        '\n> ⚠️ 远程推送失败，已 @成员协助处理 Git 同步。本地 PRD 已更新，可先基于工作区继续。\n';
+    }
+
+    await this.applyExternalDevBlocker(
+      loopId,
+      assignee,
+      published.branch,
+      now,
+    );
+    await this.publishExternalHandoffCard({
+      loopId,
+      assigneeUserId: assignee.userId,
+      assigneeDisplayName: assignee.displayName,
+      branch: published.branch,
+      commitSha: published.commitSha,
+      remoteUrl: published.remoteUrl,
+      preamble: preamble || undefined,
+    });
+  }
+
+  /** Git push 失败：@ 擅长 Git 的成员处理，不中断 API */
+  private async notifyGitPushFailure(input: {
+    loopId: string;
+    assignee: LoopMember;
+    published: PrdPublishResult;
+  }): Promise<void> {
+    const members = await this.memberRepo.listByLoop(input.loopId);
+    const gitContact =
+      suggestAssignee(members, 'Git 推送 合并 rebase DevOps') ?? input.assignee;
+    const errDetail = input.published.pushError?.trim() ?? '未知错误';
+
+    await this.chatService.publishAgentMessage({
+      loopId: input.loopId,
+      phase: 'development',
+      agentId: 'orchestrator',
+      content: {
+        type: 'text',
+        body: [
+          '⚠️ **Git 推送失败**',
+          '',
+          `@${gitContact.userId}（${gitContact.displayName}）请协助处理：`,
+          '',
+          `- 分支：\`${input.published.branch}\``,
+          `- 本地提交：\`${input.published.commitSha.slice(0, 8)}\``,
+          '',
+          '远程分支已有新提交，通常需要先 `git pull --rebase` 再 push。',
+          '',
+          '```',
+          errDetail,
+          '```',
+          '',
+          '> 处理完成后可继续外部开发；PRD 已在 Loop 工作区本地提交。',
+        ].join('\n'),
+        mentions: [`@${gitContact.userId}`],
+      },
+    });
+  }
+
+  private async applyExternalDevBlocker(
+    loopId: string,
+    assignee: { userId: string; displayName: string },
+    branch: string,
+    createdAt: string,
+  ): Promise<void> {
+    await this.loopRepo.updateBlocker(
+      loopId,
+      {
+        kind: 'external',
+        phase: 'development',
+        reason: `等待 @${assignee.displayName} 在外部工具完成开发（分支 \`${branch}\`）`,
+        assigneeUserId: assignee.userId,
+        assigneeDisplayName: assignee.displayName,
+        requestedBy: 'orchestrator',
+        createdAt,
+      },
+      'blocked',
+    );
+  }
+
+  private async publishExternalHandoffCard(input: {
+    loopId: string;
+    assigneeUserId: string;
+    assigneeDisplayName: string;
+    branch: string;
+    commitSha: string;
+    remoteUrl?: string;
+    preamble?: string;
+  }): Promise<void> {
+    const repoLine = input.remoteUrl
+      ? `- 仓库：\`${input.remoteUrl}\``
+      : '- 仓库：未配置远程（请在工作区本地开发）';
+    await this.chatService.publishAgentMessage({
+      loopId: input.loopId,
+      phase: 'development',
+      agentId: 'orchestrator',
+      content: {
+        type: 'artifact',
+        body: [
+          '## 开发交接（外部工具）',
+          '',
+          ...(input.preamble ? [input.preamble, ''] : []),
+          repoLine,
+          `- 分支：\`${input.branch}\``,
+          `- PRD 路径：\`docs/loop/${input.loopId}/PRD.md\``,
+          `- 提交：\`${input.commitSha.slice(0, 8)}\``,
+          '',
+          `请 @${input.assigneeUserId}（${input.assigneeDisplayName}）使用外部工具完成开发，**push 到 \`${input.branch}\`** 后点击下方按钮。`,
+          '',
+          '> 仅被指派的负责人可确认「开发完成」。',
+        ].join('\n'),
+        mentions: [`@${input.assigneeUserId}`],
+        actions: [
+          {
+            id: 'complete-external-dev',
+            label: '开发完成，进入部署',
+            action: 'complete_external_dev',
+          },
+        ],
+      },
+    });
   }
 
   async completeExternal(input: {

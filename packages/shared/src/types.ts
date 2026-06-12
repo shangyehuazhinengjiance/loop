@@ -38,6 +38,8 @@ export interface LoopMember {
 
 export type ApprovalActionType =
   | 'approve_prd'
+  /** development 阶段 PM 增量更新 PRD 后的重确认（不触发阶段流转） */
+  | 'confirm_prd_revision'
   | 'approve_dev'
   | 'confirm_mr_merged'
   | 'confirm_master_mr_merged'
@@ -195,6 +197,8 @@ export interface LoopContext {
   opsSessionId?: string;
   deployment?: DeploymentInfo;
   development?: DevelopmentConfig;
+  /** 动态协作：被挂起等待恢复的 Agent */
+  agentRouting?: AgentRoutingState;
   /** 创建时导入的外部需求文档（已写入 Git 工作区） */
   inputRequirements?: InputRequirementsDocument;
 }
@@ -364,6 +368,13 @@ export interface ResolvedModelConfig {
 }
 
 export type AgentRole = 'pm' | 'dev' | 'ops';
+
+/** 跨阶段 @mention 触发的 Agent 挂起状态（持久化，便于恢复） */
+export interface AgentRoutingState {
+  suspendedAgent?: AgentRole;
+  suspendedAt?: string;
+  suspendedBy?: string;
+}
 
 export interface GitCredential {
   type: 'ssh' | 'token';

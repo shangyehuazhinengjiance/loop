@@ -78,8 +78,8 @@ AI Native Loop 系统是一个以**群聊**为交互形式的 AI 协作平台。
 | Loop Orchestrator | Node.js (NestJS) 或 Python (FastAPI) |
 | Dev/Ops Runtime | TypeScript + `@anthropic-ai/claude-agent-sdk` |
 | PM Runtime | 同栈 + `@anthropic-ai/sdk` 或 OpenAI-compatible Client |
-| 消息总线 | Redis Streams 或 PostgreSQL NOTIFY |
-| 持久化 | PostgreSQL |
+| 消息总线 | Redis Streams（可选） |
+| 持久化 | MySQL 8.0+ |
 | 代码工作区 | 本地目录或 Docker 卷，每 Loop 独立 |
 | Git | 私有仓库，SSH Deploy Key 或 Token |
 | 群聊前端 | Next.js + WebSocket |
@@ -825,82 +825,140 @@ Body: {
 
 ---
 
-## 10. 数据库 Schema（PostgreSQL）
+## 10. 数据库 Schema（MySQL 8.0+）
+
+> 迁移脚本见仓库根目录 `migrations/`。时间字段使用 `DATETIME(3)` 存储；API 下发时统一序列化为 UTC ISO 8601（`Z`），前端按用户本地时区展示。
 
 ```sql
 -- 项目
 CREATE TABLE projects (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name          TEXT NOT NULL,
-  git_config    JSONB NOT NULL,
-  model_config  JSONB NOT NULL,
-  created_at    TIMESTAMPTZ DEFAULT now(),
-  updated_at    TIMESTAMPTZ DEFAULT now()
-);
+  id            CHAR(36)     NOT NULL,
+  name          VARCHAR(255) NOT NULL,
+  git_config    JSON         NOT NULL,
+  model_config  JSON         NOT NULL,
+  created_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Loop
 CREATE TABLE loops (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id      UUID REFERENCES projects(id),
-  title           TEXT NOT NULL,
-  status          TEXT NOT NULL DEFAULT 'active',
-  phase           TEXT NOT NULL DEFAULT 'created',
-  git_branch      TEXT,
-  workspace_path  TEXT,
-  context         JSONB DEFAULT '{}',
-  model_overrides JSONB,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now()
-);
+  id              CHAR(36)     NOT NULL,
+  project_id      CHAR(36)     NOT NULL,
+  title           VARCHAR(512) NOT NULL,
+  status          VARCHAR(64)  NOT NULL DEFAULT 'active',
+  phase           VARCHAR(64)  NOT NULL DEFAULT 'created',
+  git_branch      VARCHAR(255) NULL,
+  workspace_path  TEXT         NULL,
+  context         JSON         NOT NULL,
+  model_overrides JSON         NULL,
+  blocker         JSON         NULL,
+  created_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_loops_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_loops_project_id ON loops (project_id);
+CREATE INDEX idx_loops_phase ON loops (phase);
 
 -- 消息
 CREATE TABLE messages (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id         UUID REFERENCES loops(id),
-  phase           TEXT NOT NULL,
-  sender_type     TEXT NOT NULL,  -- human / agent / system
-  sender_id       TEXT NOT NULL,
-  content         JSONB NOT NULL,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX idx_messages_loop_id ON messages(loop_id, created_at);
+  id          CHAR(36)     NOT NULL,
+  loop_id     CHAR(36)     NOT NULL,
+  phase       VARCHAR(64)  NOT NULL,
+  sender_type VARCHAR(64)  NOT NULL,  -- human / agent / system
+  sender_id   VARCHAR(255) NOT NULL,
+  content     JSON         NOT NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_messages_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_messages_loop_id ON messages (loop_id, created_at);
 
 -- 快照
 CREATE TABLE snapshots (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id             UUID REFERENCES loops(id),
-  phase               TEXT NOT NULL,
-  label               TEXT,
-  prd                 JSONB,
-  tasks               JSONB,
-  git_ref             TEXT,
-  git_branch          TEXT,
-  dev_session_id      TEXT,
-  message_watermark     UUID,
-  created_by          TEXT,
-  created_at          TIMESTAMPTZ DEFAULT now()
-);
+  id                CHAR(36)     NOT NULL,
+  loop_id           CHAR(36)     NOT NULL,
+  phase             VARCHAR(64)  NOT NULL,
+  label             VARCHAR(255) NULL,
+  prd               JSON         NULL,
+  tasks             JSON         NULL,
+  git_ref           VARCHAR(255) NULL,
+  git_branch        VARCHAR(255) NULL,
+  dev_session_id    VARCHAR(255) NULL,
+  message_watermark CHAR(36)     NULL,
+  created_by        VARCHAR(255) NULL,
+  created_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_snapshots_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 审批记录
 CREATE TABLE approvals (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id     UUID REFERENCES loops(id),
-  action      TEXT NOT NULL,
-  approved_by TEXT NOT NULL,
-  note        TEXT,
-  created_at  TIMESTAMPTZ DEFAULT now()
-);
+  id          CHAR(36)     NOT NULL,
+  loop_id     CHAR(36)     NOT NULL,
+  action      VARCHAR(64)  NOT NULL,
+  approved_by VARCHAR(255) NOT NULL,
+  phase       VARCHAR(64)  NULL,
+  note        TEXT         NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_approvals_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 阶段流转历史
 CREATE TABLE phase_transitions (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  loop_id     UUID REFERENCES loops(id),
-  from_phase  TEXT,
-  to_phase    TEXT NOT NULL,
-  trigger     TEXT NOT NULL,  -- approval / rollback / auto
-  snapshot_id UUID REFERENCES snapshots(id),
-  created_at  TIMESTAMPTZ DEFAULT now()
-);
+  id          CHAR(36)    NOT NULL,
+  loop_id     CHAR(36)    NOT NULL,
+  from_phase  VARCHAR(64) NULL,
+  to_phase    VARCHAR(64) NOT NULL,
+  `trigger`   VARCHAR(64) NOT NULL,
+  snapshot_id CHAR(36)    NULL,
+  created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_phase_transitions_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Loop 成员
+CREATE TABLE loop_members (
+  loop_id       CHAR(36)     NOT NULL,
+  user_id       VARCHAR(255) NOT NULL,
+  display_name  VARCHAR(64)  NOT NULL,
+  bio           TEXT         NOT NULL DEFAULT '',
+  joined_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (loop_id, user_id),
+  CONSTRAINT fk_loop_members_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Artifact 版本
+CREATE TABLE artifacts (
+  id          CHAR(36)     NOT NULL,
+  loop_id     CHAR(36)     NOT NULL,
+  phase       VARCHAR(64)  NOT NULL,
+  type        VARCHAR(64)  NOT NULL,
+  name        VARCHAR(255) NOT NULL,
+  version     INT          NOT NULL DEFAULT 1,
+  content     JSON         NOT NULL,
+  diff_from   CHAR(36)     NULL,
+  created_by  VARCHAR(255) NOT NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_artifacts_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 审计日志
+CREATE TABLE audit_logs (
+  id          CHAR(36)     NOT NULL,
+  loop_id     CHAR(36)     NOT NULL,
+  agent       VARCHAR(255) NULL,
+  action      VARCHAR(255) NOT NULL,
+  detail      JSON         NOT NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_audit_logs_loop FOREIGN KEY (loop_id) REFERENCES loops (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
 ---
@@ -942,7 +1000,7 @@ ai-native-loop/
 ### Sprint 1：核心闭环（1-2 周）
 
 - [ ] Loop CRUD + Phase 状态机（含 rollback API）
-- [ ] PostgreSQL Schema + 迁移
+- [x] MySQL Schema + 迁移
 - [ ] 群聊 Gateway（WebSocket）+ 基础 UI
 - [ ] PM Agent（Client SDK）+ PRD 确认卡点
 - [ ] Dev Agent（Agent SDK）+ 单 Loop 工作区
@@ -992,7 +1050,7 @@ ai-native-loop/
 | `@anthropic-ai/claude-agent-sdk` | Dev/Ops Agent Runtime |
 | `@anthropic-ai/sdk` | PM Agent Runtime |
 | NestJS 或 FastAPI | Orchestrator |
-| PostgreSQL 15+ | 持久化 |
+| MySQL 8.0+ | 持久化 |
 | Redis（可选） | 消息总线 |
 | Next.js 14+ | 群聊前端 |
 | LiteLLM（可选） | 自建模型网关 |
@@ -1003,7 +1061,8 @@ ai-native-loop/
 
 ```bash
 # 数据库
-DATABASE_URL=postgresql://...
+DATABASE_URL=mysql://loop:loop@localhost:3306/loop
+DB_TIMEZONE=+08:00
 
 # PM Agent 模型
 PM_MODEL_BASE_URL=https://...
