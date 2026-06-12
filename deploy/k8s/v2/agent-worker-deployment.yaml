@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loop-agent-worker
+  namespace: loop
+  labels:
+    app: loop-agent-worker
+    loop.version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loop-agent-worker
+  template:
+    metadata:
+      labels:
+        app: loop-agent-worker
+        loop.version: v2
+    spec:
+      containers:
+        - name: agent-worker
+          image: harbor.qihoo.net/ai-native/loop-agent-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3010
+          envFrom:
+            - configMapRef:
+                name: loop-config
+            - secretRef:
+                name: loop-secrets
+          volumeMounts:
+            - name: workspaces
+              mountPath: /data/workspaces
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3010
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3010
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: loop-workspaces

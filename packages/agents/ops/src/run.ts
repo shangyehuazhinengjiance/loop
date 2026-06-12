@@ -26,6 +26,7 @@ export interface RunOpsAgentInput {
   members?: LoopMember[];
   triggeredByUserId?: string;
   deployTarget?: OpsDeployTarget | null;
+  runId?: string;
   signal?: AbortSignal;
 }
 
@@ -42,7 +43,7 @@ function loadMcpServers(): NonNullable<Options['mcpServers']> {
 export async function runOpsAgent(input: RunOpsAgentInput): Promise<void> {
   if (input.signal?.aborted) return;
 
-  const api = new OrchestratorApi(input.orchestratorUrl);
+  const api = new OrchestratorApi(input.orchestratorUrl, input.runId);
   const loop = await api.getLoop(input.loopId);
   const members = input.members ?? [];
 

@@ -1,0 +1,150 @@
+# 子任务流模板（v2 种子数据，启动时同步到 workstream_templates 表）
+
+templates:
+  - id: pm-prd
+    name: PM 撰写 PRD
+    owner_kind: agent
+    default_owner: pm-agent
+    ephemeral: false
+    mention: pm-agent
+    tag_on_complete:
+      prefix: prd
+      paths:
+        - "docs/loop/{loopId}/PRD.md"
+    start:
+      - type: mention
+        target: pm-agent
+    end:
+      - type: artifact_committed
+        path: "docs/loop/{loopId}/PRD.md"
+      - type: approval
+        action: approve_prd
+        optional: true
+
+  - id: pm-revision
+    name: PM 修订 PRD
+    owner_kind: agent
+    default_owner: pm-agent
+    ephemeral: false
+    mention: pm-agent
+    tag_on_complete:
+      prefix: prd
+      paths:
+        - "docs/loop/{loopId}/PRD.md"
+    start:
+      - type: spawn
+      - type: mention
+        target: pm-agent
+    end:
+      - type: artifact_committed
+        path: "docs/loop/{loopId}/PRD.md"
+
+  - id: pm-clarify
+    name: PM 需求澄清
+    owner_kind: agent
+    default_owner: pm-agent
+    ephemeral: true
+    mention: pm-agent
+    start:
+      - type: mention
+        target: pm-agent
+      - type: spawn
+    end:
+      - type: explicit_action
+        actionId: clarify_done
+
+  - id: dev-impl
+    name: Dev 实现
+    owner_kind: agent
+    default_owner: dev-agent
+    ephemeral: false
+    mention: dev-agent
+    tag_on_complete:
+      prefix: dev
+      paths: []
+    start:
+      - type: mention
+        target: dev-agent
+    end:
+      - type: approval
+        action: approve_dev
+
+  - id: human-mr-merge
+    name: 合并 MR
+    owner_kind: human
+    default_owner: null
+    ephemeral: true
+    start:
+      - type: manual
+        by: any_human
+    end_any_of:
+      - type: external_webhook
+        event: merge_request.merged
+      - type: explicit_action
+        actionId: confirm_mr_merged
+      - type: chat_intent
+        patterns: ["已合并", "MR merged", "合完了"]
+      - type: peer_confirm
+        by: any_human
+
+  - id: human-test-verify
+    name: 测试验收
+    owner_kind: human
+    default_owner: null
+    ephemeral: true
+    start:
+      - type: manual
+        by: any_human
+    end_any_of:
+      - type: explicit_action
+        actionId: approve_test
+      - type: chat_intent
+        patterns: ["测试通过", "验收通过"]
+
+  - id: ops-deploy-test
+    name: Ops 部署测试环境
+    owner_kind: agent
+    default_owner: ops-agent
+    ephemeral: false
+    mention: ops-agent
+    tag_on_complete:
+      prefix: staging
+      paths: []
+    start:
+      - type: mention
+        target: ops-agent
+    end:
+      - type: external_webhook
+        event: deploy.staging.success
+
+  - id: ops-deploy-prod
+    name: Ops 部署生产
+    owner_kind: agent
+    default_owner: ops-agent
+    ephemeral: false
+    mention: ops-agent
+    tag_on_complete:
+      prefix: release
+      paths: []
+    start:
+      - type: mention
+        target: ops-agent
+    end:
+      - type: approval
+        action: approve_deploy
+
+  - id: human-freeform
+    name: 人工任务
+    owner_kind: human
+    default_owner: null
+    ephemeral: true
+    start:
+      - type: manual
+        by: any_human
+    end_any_of:
+      - type: explicit_action
+        actionId: task_done
+      - type: chat_intent
+        patterns: ["做完了", "已完成", "done"]
+      - type: peer_confirm
+        by: any_human

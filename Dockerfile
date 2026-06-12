@@ -1,5 +1,7 @@
 # =============================================================================
-# AI Native Loop — Orchestrator 镜像
+# AI Native Loop — Orchestrator 镜像（v1 NestJS，已废弃）
+# 新部署请使用 Dockerfile.orchestrator-v2 + Dockerfile.agent-worker
+# 见 .loop/V1_RETIREMENT.md
 # =============================================================================
 # 【推荐】使用预装依赖的基础镜像（见 deploy/DOCKER.md）：
 #

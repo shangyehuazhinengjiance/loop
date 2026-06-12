@@ -1,4 +1,5 @@
 apiVersion: apps/v1
+# v1 legacy — 新环境请使用 deploy/k8s/v2/orchestrator-deployment.yaml
 kind: Deployment
 metadata:
   name: loop-orchestrator

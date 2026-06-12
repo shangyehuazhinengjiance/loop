@@ -24,13 +24,14 @@ export interface RunPmAgentInput {
   requirement?: string;
   loopDotLoopContext?: string;
   isLoopEntry?: boolean;
+  runId?: string;
   signal?: AbortSignal;
 }
 
 export async function runPmAgent(input: RunPmAgentInput): Promise<void> {
   if (input.signal?.aborted) return;
 
-  const api = new OrchestratorApi(input.orchestratorUrl);
+  const api = new OrchestratorApi(input.orchestratorUrl, input.runId);
   const loop = await api.getLoop(input.loopId);
   const members = input.members ?? [];
 

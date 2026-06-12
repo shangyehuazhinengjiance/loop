@@ -1,5 +1,5 @@
-# 构建三个 Docker 镜像（推送到 Harbor 等需在仓库 Settings → Secrets 配置）
-# 触发：push 到 master/test，或手动 workflow_dispatch
+# 构建 Loop v2 四个业务镜像（+ 可选 v1 orchestrator）
+# 触发：push 到 master/main/test，或手动 workflow_dispatch
 
 name: Docker Build
 
@@ -7,43 +7,68 @@ on:
   push:
     branches: [master, main, test]
   workflow_dispatch:
+    inputs:
+      build_v1:
+        description: 'Also build deprecated v1 orchestrator'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 env:
   REGISTRY: harbor.qihoo.net/ai-native
   DOCKER_BUILDKIT: "1"
-  # 按实际修改；不 push 时可只 build
+  TAG: ${{ github.sha }}
+  NEXT_PUBLIC_ORCHESTRATOR_URL: ${{ vars.NEXT_PUBLIC_ORCHESTRATOR_URL || 'http://localhost:3000' }}
+  NEXT_PUBLIC_WS_URL: ${{ vars.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001' }}
 
 jobs:
-  build-orchestrator:
+  build-orchestrator-v2:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify layout
+        run: test -f packages/orchestrator-v2/requirements.txt
+      - name: Build orchestrator-v2
+        run: docker build -f Dockerfile.orchestrator-v2 -t loop-orchestrator-v2:${{ env.TAG }} .
 
-      - name: Verify monorepo layout
-        run: test -f packages/shared/package.json
-
-      - name: Build orchestrator
-        run: docker build -f Dockerfile -t loop-orchestrator:${{ github.sha }} .
+  build-agent-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build agent-worker
+        run: |
+          docker build -f Dockerfile.agent-worker \
+            -t loop-agent-worker:${{ env.TAG }} .
 
   build-gateway:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f Dockerfile.gateway -t loop-gateway:${{ github.sha }} .
+      - run: docker build -f Dockerfile.gateway -t loop-gateway:${{ env.TAG }} .
 
   build-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - name: Build web
+        run: |
           docker build -f Dockerfile.web \
-            --build-arg NEXT_PUBLIC_ORCHESTRATOR_URL=${{ vars.NEXT_PUBLIC_ORCHESTRATOR_URL || 'http://localhost:3000' }} \
-            --build-arg NEXT_PUBLIC_WS_URL=${{ vars.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001' }} \
-            -t loop-web:${{ github.sha }} .
+            --build-arg NEXT_PUBLIC_ORCHESTRATOR_URL=${{ env.NEXT_PUBLIC_ORCHESTRATOR_URL }} \
+            --build-arg NEXT_PUBLIC_WS_URL=${{ env.NEXT_PUBLIC_WS_URL }} \
+            -t loop-web:${{ env.TAG }} .
 
-  # 可选：登录 Harbor 并 push（需配置 secrets）
+  build-orchestrator-v1-deprecated:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_v1 == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build v1 orchestrator (deprecated)
+        run: docker build -f Dockerfile -t loop-orchestrator:${{ env.TAG }} .
+
+  # 可选：登录 Harbor 并 push（需配置 secrets REGISTRY_USERNAME / REGISTRY_PASSWORD）
   # push:
-  #   needs: [build-orchestrator, build-gateway, build-web]
+  #   needs: [build-orchestrator-v2, build-agent-worker, build-gateway, build-web]
   #   runs-on: ubuntu-latest
   #   steps:
   #     - run: echo "docker login && docker push ..."

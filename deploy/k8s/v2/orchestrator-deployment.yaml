@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loop-orchestrator
+  namespace: loop
+  labels:
+    app: loop-orchestrator
+    loop.version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loop-orchestrator
+  template:
+    metadata:
+      labels:
+        app: loop-orchestrator
+        loop.version: v2
+    spec:
+      containers:
+        - name: orchestrator
+          image: harbor.qihoo.net/ai-native/loop-orchestrator-v2:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: loop-config
+            - secretRef:
+                name: loop-secrets
+          volumeMounts:
+            - name: workspaces
+              mountPath: /data/workspaces
+            - name: git-deploy-key
+              mountPath: /secrets/git
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: loop-workspaces
+        - name: git-deploy-key
+          secret:
+            secretName: loop-git-deploy-key
+            defaultMode: 0400

@@ -1,0 +1,27 @@
+# Orchestrator v2 — FastAPI 编排服务
+# docker build -f Dockerfile.orchestrator-v2 -t loop-orchestrator-v2 .
+
+FROM python:3.12-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY packages/orchestrator-v2/requirements.txt ./packages/orchestrator-v2/requirements.txt
+RUN pip install --no-cache-dir -r packages/orchestrator-v2/requirements.txt
+
+COPY packages/orchestrator-v2 ./packages/orchestrator-v2
+COPY config ./config
+COPY migrations ./migrations
+
+WORKDIR /app/packages/orchestrator-v2
+
+ENV ORCHESTRATOR_PORT=3000
+ENV AGENT_WORKER_URL=http://loop-agent-worker:3010
+ENV WORKSPACE_ROOT=/workspaces
+
+EXPOSE 3000
+
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3000"]

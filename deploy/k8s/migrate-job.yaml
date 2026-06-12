@@ -1,4 +1,5 @@
 apiVersion: batch/v1
+# v1 legacy — 新环境请使用 deploy/k8s/v2/migrate-job.yaml
 kind: Job
 metadata:
   name: loop-migrate

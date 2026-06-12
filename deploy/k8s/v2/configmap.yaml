@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loop-config
+  namespace: loop
+data:
+  # ── Orchestrator v2 ───────────────────────────────────
+  ORCHESTRATOR_PORT: "3000"
+  ORCHESTRATOR_URL: "http://loop-orchestrator:3000"
+  AGENT_WORKER_URL: "http://loop-agent-worker:3010"
+  WORKSPACE_ROOT: "/data/workspaces"
+
+  GIT_DEFAULT_REMOTE_URL: "git@github.com:shangyehuazhinengjiance/loop.git"
+  GIT_DEFAULT_BRANCH: "master"
+  GIT_DEFAULT_CREDENTIAL_REF: "GIT_SSH_KEY_PATH"
+  GIT_SSH_KEY_PATH: "/secrets/git/id_ed25519"
+
+  PM_MODEL_BASE_URL: "https://api.anthropic.com"
+  PM_MODEL_NAME: "claude-sonnet-4-20250514"
+  DEV_MODEL_BASE_URL: "https://api.360.cn"
+  DEV_MODEL_NAME: "google/gemini-2.5-pro"
+  DEV_AGENT_RUNTIME: "client-sdk"
+  OPS_MODEL_BASE_URL: "https://api.anthropic.com"
+  OPS_MODEL_NAME: "claude-sonnet-4-20250514"
+  # LITELLM_PROXY_URL: "http://litellm:4000/v1"
+
+  # ── Agent Worker ──────────────────────────────────────
+  AGENT_WORKER_PORT: "3010"
+
+  # ── Gateway ─────────────────────────────────────────
+  WS_PORT: "3001"
+
+  # ── Web ─────────────────────────────────────────────
+  PORT: "3002"
+  HOSTNAME: "0.0.0.0"

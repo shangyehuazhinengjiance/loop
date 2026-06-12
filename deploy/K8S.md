@@ -1,9 +1,11 @@
 # Kubernetes 部署指南
 
 > **代码仓库**：https://github.com/shangyehuazhinengjiance/loop  
-> 前置条件：三个镜像已构建并推送到公司镜像仓库  
-> `loop-orchestrator` / `loop-gateway` / `loop-web`  
-> MySQL 使用公司托管实例（集群外）
+>
+> **v2（推荐）**：四镜像 `loop-orchestrator-v2` / `loop-agent-worker` / `loop-gateway` / `loop-web`  
+> 部署清单与步骤见 **[deploy/k8s/v2/README.md](./k8s/v2/README.md)**  
+>
+> 以下为 **v1 legacy** 说明（NestJS 单体 `loop-orchestrator`），新环境请勿使用。
 
 ---
 

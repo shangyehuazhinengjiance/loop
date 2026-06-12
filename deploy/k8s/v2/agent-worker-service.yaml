@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: loop-agent-worker
+  namespace: loop
+  labels:
+    app: loop-agent-worker
+spec:
+  selector:
+    app: loop-agent-worker
+  ports:
+    - name: http
+      port: 3010
+      targetPort: 3010

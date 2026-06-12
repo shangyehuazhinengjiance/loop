@@ -1,0 +1,24 @@
+{
+  "name": "@loop/agent-worker",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --import tsx --watch src/server.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@loop/agent-dev": "*",
+    "@loop/agent-ops": "*",
+    "@loop/agent-pm": "*",
+    "@loop/shared": "*",
+    "dotenv": "^16.4.7",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

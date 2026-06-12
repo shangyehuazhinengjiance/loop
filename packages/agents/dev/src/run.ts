@@ -11,6 +11,7 @@ export interface RunDevAgentInput {
   workspacePath: string;
   memberRoster?: string;
   sandboxMode?: 'local' | 'docker';
+  runId?: string;
   signal?: AbortSignal;
 }
 
@@ -40,7 +41,7 @@ async function assertDevPrerequisites(
 export async function runDevAgent(input: RunDevAgentInput): Promise<void> {
   if (input.signal?.aborted) return;
 
-  const api = new OrchestratorApi(input.orchestratorUrl);
+  const api = new OrchestratorApi(input.orchestratorUrl, input.runId);
   const loop = await api.getLoop(input.loopId);
 
   await mkdir(input.workspacePath, { recursive: true });

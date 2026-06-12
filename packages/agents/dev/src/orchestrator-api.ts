@@ -9,7 +9,10 @@ export interface LoopRecord {
 }
 
 export class OrchestratorApi {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly runId?: string,
+  ) {}
 
   async getLoop(loopId: string): Promise<LoopRecord> {
     const res = await fetch(`${this.baseUrl}/api/loops/${loopId}`);
@@ -31,6 +34,7 @@ export class OrchestratorApi {
         phase,
         content,
         sdkMessageType,
+        runId: this.runId,
       }),
     });
     if (!res.ok) throw new Error(`postAgentMessage: ${res.status}`);

@@ -1,0 +1,36 @@
+# Agent Worker — 运行 PM / Dev / Ops Agent（v2）
+# docker build -f Dockerfile.agent-worker -t loop-agent-worker .
+
+ARG BASE_REGISTRY=harbor.qihoo.net/syhzqfw-sjxm-ai-native
+ARG BASE_TAG=latest
+
+FROM ${BASE_REGISTRY}/loop-base-monorepo-builder:${BASE_TAG} AS builder
+
+WORKDIR /app
+
+COPY packages ./packages
+COPY config ./config
+
+RUN npm run build -w @loop/shared \
+ && npm run build -w @loop/agent-pm \
+ && npm run build -w @loop/agent-dev \
+ && npm run build -w @loop/agent-ops \
+ && npm run build -w @loop/agent-worker
+
+FROM ${BASE_REGISTRY}/loop-base-orchestrator-runner:${BASE_TAG} AS runner
+
+ENV AGENT_WORKER_PORT=3010
+ENV ORCHESTRATOR_URL=http://loop-orchestrator:3000
+
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/agents/pm/dist ./packages/agents/pm/dist
+COPY --from=builder /app/packages/agents/dev/dist ./packages/agents/dev/dist
+COPY --from=builder /app/packages/agents/ops/dist ./packages/agents/ops/dist
+COPY --from=builder /app/packages/agent-worker/dist ./packages/agent-worker/dist
+COPY --from=builder /app/config ./config
+
+WORKDIR /app/packages/agent-worker
+
+EXPOSE 3010
+
+CMD ["node", "dist/server.js"]

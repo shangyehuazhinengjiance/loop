@@ -1,39 +1,69 @@
-// AI Native Loop — Docker 构建示例
+// AI Native Loop — v2 Docker 构建（四镜像）
 // Git 源：https://github.com/shangyehuazhinengjiance/loop
 // 关键：docker build 的 context 必须是仓库根目录（最后一个参数为 .）
+//
+// 环境变量（Job 参数或 Credentials）：
+//   REGISTRY          镜像仓库前缀，如 harbor.qihoo.net/ai-native
+//   BUILD_V1          设为 true 时额外构建 v1 NestJS orchestrator（已废弃）
+//   NEXT_PUBLIC_*     Web 镜像构建时写入前端 bundle
 
 pipeline {
   agent any
 
   environment {
-    REGISTRY = 'harbor.qihoo.net/your-namespace'
-    // Dockerfile 使用 RUN --mount=type=cache，必须启用 BuildKit（Docker 18.09+）
+    REGISTRY = "${env.REGISTRY ?: 'harbor.qihoo.net/ai-native'}"
+    TAG = "${env.BUILD_NUMBER ?: env.GIT_COMMIT?.take(12) ?: 'latest'}"
     DOCKER_BUILDKIT = '1'
+    BUILD_V1 = "${env.BUILD_V1 ?: 'false'}"
+    NEXT_PUBLIC_ORCHESTRATOR_URL = "${env.NEXT_PUBLIC_ORCHESTRATOR_URL ?: 'https://api.loop.example.com'}"
+    NEXT_PUBLIC_WS_URL = "${env.NEXT_PUBLIC_WS_URL ?: 'wss://ws.loop.example.com'}"
   }
 
   stages {
     stage('Checkout') {
       steps {
         checkout scm
-        // 校验 monorepo 结构完整
-        sh 'test -f packages/shared/package.json'
-        sh 'test -f packages/orchestrator/package.json'
+        sh '''
+          test -f packages/shared/package.json
+          test -f packages/orchestrator-v2/requirements.txt
+          test -f Dockerfile.orchestrator-v2
+          test -f Dockerfile.agent-worker
+        '''
       }
     }
 
-    stage('Build Orchestrator') {
+    stage('Build v2 Images') {
       steps {
         sh '''
-          # 18.09 起支持 BuildKit，但必须显式开启；变量写在同一行最稳妥
-          DOCKER_BUILDKIT=1 docker build -f Dockerfile -t ${REGISTRY}/loop-orchestrator:${BUILD_NUMBER} .
+          chmod +x scripts/build-images.sh
+          REGISTRY="$REGISTRY" TAG="$TAG" BUILD_V1="$BUILD_V1" \
+            NEXT_PUBLIC_ORCHESTRATOR_URL="$NEXT_PUBLIC_ORCHESTRATOR_URL" \
+            NEXT_PUBLIC_WS_URL="$NEXT_PUBLIC_WS_URL" \
+            ./scripts/build-images.sh
         '''
       }
     }
 
     stage('Push') {
-      steps {
-        sh 'docker push ${REGISTRY}/loop-orchestrator:${BUILD_NUMBER}'
+      when {
+        expression { return env.REGISTRY?.trim() }
       }
+      steps {
+        sh '''
+          for name in orchestrator-v2 agent-worker gateway web; do
+            docker push "${REGISTRY}/loop-${name}:${TAG}"
+          done
+          if [ "$BUILD_V1" = "true" ]; then
+            docker push "${REGISTRY}/loop-orchestrator:${TAG}"
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Built: loop-orchestrator-v2 loop-agent-worker loop-gateway loop-web :${TAG}"
     }
   }
 }
