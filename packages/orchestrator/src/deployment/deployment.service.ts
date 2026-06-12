@@ -9,13 +9,20 @@ import {
   type DeploymentExecutionMode,
   type LoopMember,
 } from '@loop/shared';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { AgentCoordinator } from '../agent/agent-coordinator.js';
 import { ChatService } from '../chat/chat.service.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
-import { GitContinueService } from '../git/git-continue.service.js';
 import { GitService } from '../git/git.service.js';
 import { isGitSyncConflictError } from '../git/git-sync-conflict.error.js';
 import {
@@ -24,10 +31,15 @@ import {
 } from '../git/merge-request.service.js';
 import { SecretManager } from '../git/secret-manager.js';
 
+const require = createRequire(fileURLToPath(import.meta.url));
+
+type GitContinueService = import('../git/git-continue.service.js').GitContinueService;
+
 @Injectable()
 export class DeploymentService {
   constructor(
     private readonly gitService: GitService,
+    @Inject(forwardRef(() => require('../git/git-continue.service.js').GitContinueService))
     private readonly gitContinue: GitContinueService,
     private readonly loopRepo: LoopRepository,
     private readonly memberRepo: LoopMemberRepository,

@@ -12,7 +12,15 @@ import {
   type LoopDotLoopBundle,
   type ProjectModelConfig,
 } from '@loop/shared';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ChatService } from '../chat/chat.service.js';
@@ -20,13 +28,16 @@ import { LoopProgressService } from '../chat/loop-progress.service.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
 import { ProjectRepository } from '../db/repositories/project.repository.js';
-import { GitContinueService } from '../git/git-continue.service.js';
 import { GitService } from '../git/git.service.js';
 import { isGitSyncConflictError } from '../git/git-sync-conflict.error.js';
 import { MergeRequestService } from '../git/merge-request.service.js';
 import { SecretManager } from '../git/secret-manager.js';
 import { ModelRouter } from '../model/model-router.js';
 import { generateUpdatedLoopDotFiles } from './loop-dot-loop-llm.js';
+
+const require = createRequire(fileURLToPath(import.meta.url));
+
+type GitContinueService = import('../git/git-continue.service.js').GitContinueService;
 
 const DEFAULT_README = `# 项目说明
 
@@ -59,6 +70,7 @@ export class LoopDotLoopService {
     private readonly chatService: ChatService,
     private readonly progress: LoopProgressService,
     private readonly gitService: GitService,
+    @Inject(forwardRef(() => require('../git/git-continue.service.js').GitContinueService))
     private readonly gitContinue: GitContinueService,
     private readonly mergeRequestService: MergeRequestService,
     private readonly secretManager: SecretManager,

@@ -57,15 +57,14 @@ export function LoopWorkspaceV2({ loopId }: { loopId: string }) {
     ws.onclose = () => setConnected(false);
     ws.onmessage = (ev) => {
       try {
-        const data = JSON.parse(ev.data as string) as {
-          type: string;
-          messages?: Message[];
-          message?: Message;
-        };
-        if (data.type === 'history' && data.messages) {
+        const data = JSON.parse(ev.data as string) as
+          | { type: 'history'; messages: Message[] }
+          | { type: 'message'; message: Message }
+          | { type: 'processing'; active?: boolean };
+        if (data.type === 'history') {
           setMessages(data.messages);
         }
-        if (data.type === 'message' && data.message) {
+        if (data.type === 'message') {
           appendMessage(data.message);
         }
         if (data.type === 'processing') {

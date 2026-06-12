@@ -7,14 +7,19 @@ import {
   forwardRef,
   Inject,
 } from '@nestjs/common';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { BlockerService } from '../blocker/blocker.service.js';
 import { ChatService } from '../chat/chat.service.js';
 import { LoopMemberRepository } from '../db/repositories/loop-member.repository.js';
 import { LoopRepository } from '../db/repositories/loop.repository.js';
-import { DeploymentService } from '../deployment/deployment.service.js';
-import { LoopDotLoopService } from '../loop-context/loop-dot-loop.service.js';
 import { GitService } from './git.service.js';
 import { isGitSyncConflictError } from './git-sync-conflict.error.js';
+
+const require = createRequire(fileURLToPath(import.meta.url));
+
+type DeploymentService = import('../deployment/deployment.service.js').DeploymentService;
+type LoopDotLoopService = import('../loop-context/loop-dot-loop.service.js').LoopDotLoopService;
 
 export interface ReportGitConflictInput {
   branch: string;
@@ -31,9 +36,11 @@ export class GitContinueService {
     private readonly blockerService: BlockerService,
     private readonly chatService: ChatService,
     private readonly gitService: GitService,
-    @Inject(forwardRef(() => LoopDotLoopService))
+    @Inject(
+      forwardRef(() => require('../loop-context/loop-dot-loop.service.js').LoopDotLoopService),
+    )
     private readonly loopDotLoop: LoopDotLoopService,
-    @Inject(forwardRef(() => DeploymentService))
+    @Inject(forwardRef(() => require('../deployment/deployment.service.js').DeploymentService))
     private readonly deployment: DeploymentService,
   ) {}
 
