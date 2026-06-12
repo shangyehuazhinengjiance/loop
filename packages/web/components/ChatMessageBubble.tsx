@@ -13,6 +13,7 @@ interface Action {
   id: string;
   label: string;
   action: string;
+  runId?: string;
 }
 
 export interface ChatMessageModel {
