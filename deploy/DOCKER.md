@@ -1,5 +1,7 @@
 # Docker 构建与 CI/CD 参考
 
+> **单机服务器部署**（不用 K8s）：见 [SERVER.md](./SERVER.md)，使用 `deploy/server/deploy.sh` 一键 Compose 部署。
+
 > MySQL / Redis 使用公司托管服务，镜像内不包含数据库。
 > PM / Dev / Ops Agent 作为库内嵌在 **orchestrator** 镜像中，无需单独构建。
 

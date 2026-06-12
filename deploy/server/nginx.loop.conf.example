@@ -1,0 +1,55 @@
+# Nginx 反代示例（宿主机安装 nginx 后）
+#   sudo cp nginx.loop.conf.example /etc/nginx/conf.d/loop.conf
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# 使用前：
+#   1. 修改 server_name
+#   2. 重新构建 web 镜像，.env 中设置：
+#        NEXT_PUBLIC_ORCHESTRATOR_URL=https://loop.example.com/api
+#        NEXT_PUBLIC_WS_URL=wss://loop.example.com/ws
+#   3. ./deploy.sh build && ./deploy.sh restart
+
+upstream loop_web {
+    server 127.0.0.1:3002;
+}
+
+upstream loop_orchestrator {
+    server 127.0.0.1:3000;
+}
+
+upstream loop_gateway {
+    server 127.0.0.1:3001;
+}
+
+server {
+    listen 80;
+    server_name loop.example.com;
+
+    # 建议生产环境配置 HTTPS（certbot / 公司证书）
+
+    location / {
+        proxy_pass http://loop_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/ {
+        proxy_pass http://loop_orchestrator/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 300s;
+    }
+
+    location /ws/loops/ {
+        proxy_pass http://loop_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+    }
+}

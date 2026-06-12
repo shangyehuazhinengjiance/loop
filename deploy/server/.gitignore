@@ -1,0 +1,7 @@
+.env
+data/workspaces/*
+data/mysql/*
+data/git-secrets/*
+!data/workspaces/.gitkeep
+!data/mysql/.gitkeep
+!data/git-secrets/.gitkeep
